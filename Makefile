@@ -1,4 +1,4 @@
-EMCC = emcc
+EMCC = em++
 SRC_DIR = src
 BUILD_DIR = build
 SRC = $(SRC_DIR)/main.cpp
