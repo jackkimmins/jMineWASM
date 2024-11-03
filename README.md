@@ -1,6 +1,6 @@
 ![Game Example Sceenshot](https://github.com/jackkimmins/jMineWASM/blob/main/screenshots/jMine-ExampleScreenshot.jpg)
 # jMineWASM
-This project is a refined version of [my original 3D block game](https://github.com/jackkimmins/3D-Cube-Game), leveraging C++ and OpenGL, compiled to WebAssembly using Emscripten and utilising WebGL2 for GPU rendering and much better performance.
+This project is a refined version of [my original 3D block game](https://github.com/jackkimmins/3D-Cube-Game), using C++ and OpenGL, compiled to WebAssembly using Emscripten and utilising WebGL2 for GPU rendering and much better performance compared to my first attempt.
 
 ## Features
 Features of this project include:
