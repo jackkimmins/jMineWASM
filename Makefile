@@ -1,22 +1,10 @@
-# Makefile
-
-# Compiler
 EMCC = emcc
-
-# Source files
-SRC = main.cpp
-
+SRC_DIR = src
+BUILD_DIR = build
+SRC = $(SRC_DIR)/main.cpp
 ASSETS_DIR = assets
-
 SHELLFILE = shell_minimal.html
-
-# Preload files with mapping: local assets/ to virtual /assets/
-PRELOAD = assets@/assets
-
-# Output file name
-OUT = index.html
-
-# Compiler flags
+OUT = $(BUILD_DIR)/index.html
 CFLAGS = -O3 \
         -s USE_WEBGL2=1 \
         -s FULL_ES3=1 \
@@ -28,21 +16,17 @@ CFLAGS = -O3 \
         -s EXPORTED_FUNCTIONS='["_main", "_setPointerLocked"]' \
         -std=c++20 \
         -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap']" \
-        --preload-file assets@/assets
+        --preload-file $(ASSETS_DIR)@/assets
 
-# Linker flags
-LDFLAGS = 
-
-# Build target
 all: $(OUT)
 
-# use shell shell_minimal.html
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
-$(OUT): $(SRC)
-	$(EMCC) $(CFLAGS) $(SRC) -o $(OUT) $(LDFLAGS) --shell-file $(SHELLFILE)
+$(OUT): $(SRC) | $(BUILD_DIR)
+	$(EMCC) $(CFLAGS) $(SRC) -o $(OUT) --shell-file $(SHELLFILE)
 
-# Clean build files
 clean:
-	rm -f $(OUT) *.js *.wasm
+	rm -rf $(BUILD_DIR)
 
 .PHONY: all clean

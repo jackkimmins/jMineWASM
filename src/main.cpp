@@ -10,7 +10,7 @@
 #include <algorithm>
 #include "stb_image.h"
 
-// World Dimensions
+// World Dimensions 
 constexpr int CHUNK_SIZE = 16;
 constexpr int CHUNK_HEIGHT = 16;
 
