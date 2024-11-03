@@ -99,19 +99,17 @@ public:
 #include "mesh.hpp"
 #include "game.hpp"
 
-// Global Game Instance
+// Global Game Instance 
 Game* gameInstance = nullptr;
 
 // Extern Functions
 extern "C" void setPointerLocked(bool locked) {
-    if (gameInstance) {
-        gameInstance->pointerLocked = locked;
-    }
+    if (gameInstance) gameInstance->pointerLocked = locked;
 }
 
 // Callback Functions
 EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *userData) {
-    if(eventType == EMSCRIPTEN_EVENT_KEYDOWN || eventType == EMSCRIPTEN_EVENT_KEYUP) {
+    if (eventType == EMSCRIPTEN_EVENT_KEYDOWN || eventType == EMSCRIPTEN_EVENT_KEYUP) {
         bool pressed = eventType == EMSCRIPTEN_EVENT_KEYDOWN;
         gameInstance->handleKey(e->keyCode, pressed);
     }
@@ -119,16 +117,12 @@ EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *user
 }
 
 EM_BOOL mouse_callback(int eventType, const EmscriptenMouseEvent *e, void *userData) {
-    if(eventType == EMSCRIPTEN_EVENT_MOUSEMOVE) {
-        gameInstance->handleMouseMove(static_cast<float>(e->movementX), static_cast<float>(e->movementY));
-    }
+    if (eventType == EMSCRIPTEN_EVENT_MOUSEMOVE) gameInstance->handleMouseMove(static_cast<float>(e->movementX), static_cast<float>(e->movementY));
     return EM_TRUE;
 }
 
 EM_BOOL mouse_button_callback(int eventType, const EmscriptenMouseEvent *e, void *userData) {
-    if(eventType == EMSCRIPTEN_EVENT_MOUSEDOWN) {
-        gameInstance->handleMouseClick(e->button);
-    }
+    if (eventType == EMSCRIPTEN_EVENT_MOUSEDOWN) gameInstance->handleMouseClick(e->button);
     return EM_TRUE;
 }
 

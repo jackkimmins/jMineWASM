@@ -3,101 +3,103 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>OpenGL WASM Cube Demo</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>jMineWASM</title>
+	<meta name="description" content="jMineWASM is a Minecraft clone written in C++ and compiled to WebAssembly.">
+	<meta name="author" content="Jack Kimmins">
+	<meta name="keywords" content="Minecraft, WebAssembly, C++, jMineWASM">
+	<meta property="og:url" content="https://github.com/jackkimmins/jMineWASM">
+
     <style>
-        /* Ensure the body and html take up the full viewport without scrolling */
-        body,
-        html {
+        body, html {
             margin: 0;
             padding: 0;
             height: 100%;
-            width: 100%;
-            overflow: hidden; /* Prevent scrolling */
+            overflow: hidden;
             display: flex;
             justify-content: center;
             align-items: center;
-            background-color: #87CEEB;
-            /* Sky blue background */
+            background-color: black;
         }
 
-        /* Make the canvas fill the entire viewport */
         canvas {
             display: block;
             width: 100%;
             height: 100%;
             cursor: none;
+            transition: opacity 0.3s ease;
+        }
+
+        #statusText {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 3rem;
+            pointer-events: none;
+            display: block;
+			font-family: Arial, sans-serif;
         }
     </style>
 </head>
 
 <body>
     <canvas id="canvas"></canvas>
+    <div id="statusText">PAUSED</div>
 	<script>
-		let pointerLocked = false; // Flag to track pointer lock status
-	
-		// Get the canvas element
+		let pointerLocked = false;
 		const canvas = document.getElementById('canvas');
-	
-		// Set the canvas's internal resolution to 1920x1080
+		const statusText = document.getElementById('statusText');
+
 		canvas.width = 1920;
 		canvas.height = 1080;
-	
-		// Make the canvas scale to the viewport
 		canvas.style.width = '100%';
 		canvas.style.height = '100%';
-	
-		// Prevent context menu on the canvas
-		canvas.addEventListener('contextmenu', function(e) {
-			e.preventDefault();
-		}, false);
-	
-		// Request pointer lock on canvas click
-		canvas.addEventListener('click', function() {
-			canvas.requestPointerLock();
-		}, false);
-	
-		// Listen for pointer lock state changes
+		canvas.addEventListener('contextmenu', function(e) { e.preventDefault(); }, false);
+		canvas.addEventListener('click', function() { canvas.requestPointerLock(); }, false);
+
 		document.addEventListener('pointerlockchange', lockChangeAlert, false);
 		document.addEventListener('mozpointerlockchange', lockChangeAlert, false);
 		document.addEventListener('webkitpointerlockchange', lockChangeAlert, false);
-	
+
 		function lockChangeAlert() {
 			pointerLocked = (document.pointerLockElement === canvas ||
 				document.mozPointerLockElement === canvas ||
 				document.webkitPointerLockElement === canvas);
-			console.log("Pointer Lock State:", pointerLocked);
 			canvas.style.cursor = pointerLocked ? 'none' : 'default';
-	
-			// Notify C++ of pointer lock status
+			statusText.style.display = pointerLocked ? 'none' : 'block';
+			canvas.style.opacity = pointerLocked ? '1' : '0.5';
 			Module.ccall('setPointerLocked', 'void', ['bool'], [pointerLocked]);
 		}
-	
-		// Release pointer lock on Escape key
+
+		if (!pointerLocked) {
+			canvas.style.opacity = '0.5';
+			statusText.style.display = 'block';
+		}
+
 		document.addEventListener('keydown', function(e) {
 			if (e.key === 'Escape') {
 				document.exitPointerLock();
-			}
-
-			// Fullscreen on F11
-			else if (e.key === 'F11') {
+			} else if (e.key === 'F11') {
 				if (document.fullscreenElement) {
 					document.exitFullscreen();
 				} else {
 					document.documentElement.requestFullscreen();
 					canvas.requestPointerLock();
 				}
+			} else {
+				canvas.requestPointerLock();
 			}
 		});
-	
-		// Optional: Handle window resize events
-		window.addEventListener('resize', function() {
-			// The C++ render loop fetches the canvas size each frame
-			// Additional handling can be implemented here if needed
+
+		document.addEventListener('click', function() {
+			if (!pointerLocked) {
+				canvas.requestPointerLock();
+			}
 		});
 	</script>
-	
     <script src="index.js"></script>
-
     {{{ SCRIPT }}}
 </body>
 
