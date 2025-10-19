@@ -7,17 +7,22 @@ class Game {
 public:
     bool pointerLocked = false;
     Shader* shader;
+    Shader* outlineShader;
     Mesh mesh;
     World world;
     Camera camera;
     Player player;
     mat4 projection;
     GLint mvpLoc;
+    GLint outlineMvpLoc;
     std::chrono::steady_clock::time_point lastFrame;
     bool keys[1024] = { false };
     GLuint textureAtlas;
+    GLuint outlineVAO, outlineVBO;
+    Vector3i highlightedBlock;
+    bool hasHighlightedBlock = false;
 
-    Game() : shader(nullptr), player(SPAWN_X, SPAWN_Y, SPAWN_Z) { std::cout << "Game Constructed - Player Spawn: (" << SPAWN_X << ", " << SPAWN_Y << ", " << SPAWN_Z << ")" << std::endl; }
+    Game() : shader(nullptr), outlineShader(nullptr), player(SPAWN_X, SPAWN_Y, SPAWN_Z) { std::cout << "Game Constructed - Player Spawn: (" << SPAWN_X << ", " << SPAWN_Y << ", " << SPAWN_Z << ")" << std::endl; }
 
     void init() {
         std::cout << "Game initialisation has started..." << std::endl;
@@ -84,6 +89,29 @@ public:
         GLint textureLoc = shader->getUniform("uTexture");
         glUniform1i(textureLoc, 0);
 
+        // Create outline shader for block highlighting
+        const char* outlineVertexSrc = R"(#version 300 es
+            precision mediump float;
+            layout(location = 0) in vec3 aPos;
+            uniform mat4 uMVP;
+            void main() {
+                gl_Position = uMVP * vec4(aPos, 1.0);
+            })";
+
+        const char* outlineFragmentSrc = R"(#version 300 es
+            precision mediump float;
+            out vec4 FragColor;
+            void main() {
+                FragColor = vec4(0.0, 0.0, 0.0, 1.0); // Black outline
+            })";
+
+        outlineShader = new Shader(outlineVertexSrc, outlineFragmentSrc);
+        outlineMvpLoc = outlineShader->getUniform("uMVP");
+
+        // Setup outline VAO and VBO
+        glGenVertexArrays(1, &outlineVAO);
+        glGenBuffers(1, &outlineVBO);
+
         // Initialise and generate the world
         world.initialise();
 
@@ -129,6 +157,7 @@ public:
         processInput(deltaTime);
         applyPhysics(deltaTime);
         if (isMoving) bobbingTime += deltaTime;
+        updateHighlightedBlock();
         render();
     }
 
@@ -149,7 +178,7 @@ public:
     }
 
     void handleMouseClick(int button) {
-        float maxDistance = 4.0f;
+        float maxDistance = 4.5f;
         RaycastHit hit = raycast(maxDistance);
         if (hit.hit) {
             if (button == 0) removeBlock(hit.blockPosition.x, hit.blockPosition.y, hit.blockPosition.z);
@@ -162,6 +191,17 @@ public:
                 mesh.generate(world);
                 mesh.setup();
             }
+        }
+    }
+
+    void updateHighlightedBlock() {
+        float maxDistance = 4.5f;
+        RaycastHit hit = raycast(maxDistance);
+        if (hit.hit) {
+            hasHighlightedBlock = true;
+            highlightedBlock = hit.blockPosition;
+        } else {
+            hasHighlightedBlock = false;
         }
     }
 
@@ -440,6 +480,87 @@ private:
         }
     }
 
+    void renderBlockOutline(int x, int y, int z, const mat4& mvp) {
+        // Check which faces are exposed (not blocked by adjacent solid blocks)
+        bool frontFace = !isBlockSolid(x, y, z - 1);  // -Z
+        bool backFace = !isBlockSolid(x, y, z + 1);   // +Z
+        bool leftFace = !isBlockSolid(x - 1, y, z);   // -X
+        bool rightFace = !isBlockSolid(x + 1, y, z);  // +X
+        bool bottomFace = !isBlockSolid(x, y - 1, z); // -Y
+        bool topFace = !isBlockSolid(x, y + 1, z);    // +Y
+
+        float offset = 0.002f; // Slight offset to prevent z-fighting but stay visible
+        float minX = x - offset;
+        float maxX = x + 1.0f + offset;
+        float minY = y - offset;
+        float maxY = y + 1.0f + offset;
+        float minZ = z - offset;
+        float maxZ = z + 1.0f + offset;
+
+        // Build edges dynamically based on visible faces
+        std::vector<float> edges;
+
+        // Bottom face edges (only if bottom or adjacent vertical faces are visible)
+        if (bottomFace || frontFace) {
+            edges.insert(edges.end(), {minX, minY, minZ,  maxX, minY, minZ}); // Front bottom
+        }
+        if (bottomFace || rightFace) {
+            edges.insert(edges.end(), {maxX, minY, minZ,  maxX, minY, maxZ}); // Right bottom
+        }
+        if (bottomFace || backFace) {
+            edges.insert(edges.end(), {maxX, minY, maxZ,  minX, minY, maxZ}); // Back bottom
+        }
+        if (bottomFace || leftFace) {
+            edges.insert(edges.end(), {minX, minY, maxZ,  minX, minY, minZ}); // Left bottom
+        }
+
+        // Top face edges (only if top or adjacent vertical faces are visible)
+        if (topFace || frontFace) {
+            edges.insert(edges.end(), {minX, maxY, minZ,  maxX, maxY, minZ}); // Front top
+        }
+        if (topFace || rightFace) {
+            edges.insert(edges.end(), {maxX, maxY, minZ,  maxX, maxY, maxZ}); // Right top
+        }
+        if (topFace || backFace) {
+            edges.insert(edges.end(), {maxX, maxY, maxZ,  minX, maxY, maxZ}); // Back top
+        }
+        if (topFace || leftFace) {
+            edges.insert(edges.end(), {minX, maxY, maxZ,  minX, maxY, minZ}); // Left top
+        }
+
+        // Vertical edges (only if adjacent faces are visible)
+        if (frontFace || leftFace) {
+            edges.insert(edges.end(), {minX, minY, minZ,  minX, maxY, minZ}); // Front left
+        }
+        if (frontFace || rightFace) {
+            edges.insert(edges.end(), {maxX, minY, minZ,  maxX, maxY, minZ}); // Front right
+        }
+        if (backFace || rightFace) {
+            edges.insert(edges.end(), {maxX, minY, maxZ,  maxX, maxY, maxZ}); // Back right
+        }
+        if (backFace || leftFace) {
+            edges.insert(edges.end(), {minX, minY, maxZ,  minX, maxY, maxZ}); // Back left
+        }
+
+        // Only render if there are visible edges
+        if (edges.empty()) return;
+
+        outlineShader->use();
+        glUniformMatrix4fv(outlineMvpLoc, 1, GL_FALSE, mvp.data);
+
+        glBindVertexArray(outlineVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, outlineVBO);
+        glBufferData(GL_ARRAY_BUFFER, edges.size() * sizeof(float), edges.data(), GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+
+        glLineWidth(2.0f); // Make lines 2px wide
+        glDrawArrays(GL_LINES, 0, edges.size() / 3);
+        
+        glBindVertexArray(0);
+    }
+
     void render() {
         // Sync the camera pos with the player pos
         camera.x = player.x;
@@ -486,6 +607,12 @@ private:
 
         // Draw the mesh
         mesh.draw();
+
+        // Draw block outline if a block is being looked at
+        if (hasHighlightedBlock) {
+            // Keep depth test enabled so the block occludes its own back edges
+            renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
+        }
     }
 
     mat4 perspective(float fov, float aspect, float near, float far) const {
