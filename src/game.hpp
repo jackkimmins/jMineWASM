@@ -301,8 +301,38 @@ private:
             int blockY = y % CHUNK_HEIGHT;
             int blockZ = z % CHUNK_SIZE;
 
-            // Prevent placing a block inside the player
-            if (!isColliding(x + 0.5f, y + 0.5f, z + 0.5f)) {
+            // Don't place a block if there's already a solid block there
+            if (world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].isSolid) {
+                return;
+            }
+
+            // Prevent placing a block inside the player's bounding box
+            // Check if the block overlaps with player's AABB (feet to head)
+            float halfWidth = 0.3f;
+            float halfDepth = 0.3f;
+            
+            // Player bounding box
+            float playerMinX = player.x - halfWidth;
+            float playerMaxX = player.x + halfWidth;
+            float playerMinY = player.y;
+            float playerMaxY = player.y + PLAYER_HEIGHT;
+            float playerMinZ = player.z - halfDepth;
+            float playerMaxZ = player.z + halfDepth;
+            
+            // Block bounding box
+            float blockMinX = x;
+            float blockMaxX = x + 1.0f;
+            float blockMinY = y;
+            float blockMaxY = y + 1.0f;
+            float blockMinZ = z;
+            float blockMaxZ = z + 1.0f;
+            
+            // Check for AABB overlap
+            bool overlaps = (playerMinX < blockMaxX && playerMaxX > blockMinX) &&
+                           (playerMinY < blockMaxY && playerMaxY > blockMinY) &&
+                           (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
+            
+            if (!overlaps) {
                 world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].isSolid = true;
                 world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].type = BLOCK_PLANKS; // Set to desired block type
             }
@@ -332,6 +362,11 @@ private:
         int y = static_cast<int>(floor(rayOrigin.y));
         int z = static_cast<int>(floor(rayOrigin.z));
 
+        // Track the previous block position (for adjacent placement)
+        int prevX = x;
+        int prevY = y;
+        int prevZ = z;
+
         // Direction of the ray (+1 or -1)
         int stepX = (rayDirection.x >= 0) ? 1 : -1;
         int stepY = (rayDirection.y >= 0) ? 1 : -1;
@@ -355,13 +390,15 @@ private:
             if (isBlockSolid(x, y, z)) {
                 hitResult.hit = true;
                 hitResult.blockPosition = { x, y, z };
-
-                // For adjacent position, need to know which face we entered from
-                if (tMaxX < tMaxY && tMaxX < tMaxZ) hitResult.adjacentPosition = { x - stepX, y, z };
-                else if (tMaxY < tMaxZ) hitResult.adjacentPosition = { x, y - stepY, z };
-                else hitResult.adjacentPosition = { x, y, z - stepZ };
+                // The adjacent position is where we came from (previous block)
+                hitResult.adjacentPosition = { prevX, prevY, prevZ };
                 return hitResult;
             }
+
+            // Store current position before moving
+            prevX = x;
+            prevY = y;
+            prevZ = z;
 
             // Move to next block boundary
             if (tMaxX < tMaxY) {

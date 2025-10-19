@@ -29,9 +29,9 @@ constexpr float SPAWN_Z = WORLD_SIZE_Z / 2.0f;
 
 // Input Handling
 constexpr float BLOCK_SIZE = 1.0f;
-constexpr float GRAVITY = -13.5f;
-constexpr float JUMP_VELOCITY = 6.0f;
-constexpr float PLAYER_SPEED = 6.0f;
+constexpr float GRAVITY = -28.0f;
+constexpr float JUMP_VELOCITY = 8.5f;
+constexpr float PLAYER_SPEED = 4.5f;
 constexpr float SENSITIVITY = 0.15f;
 constexpr float CAM_FOV = 80.0f;
 constexpr float epsilon = 0.001f;
