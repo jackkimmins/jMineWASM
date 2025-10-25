@@ -3,7 +3,6 @@
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
 
-// Camera Class
 class Camera {
 public:
     float yaw = -90.0f, pitch = 0.0f;

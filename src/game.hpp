@@ -8,7 +8,7 @@ public:
     bool pointerLocked = false;
     Shader* shader;
     Shader* outlineShader;
-    Mesh mesh;
+    MeshManager meshManager;
     World world;
     Camera camera;
     Player player;
@@ -21,8 +21,12 @@ public:
     GLuint outlineVAO, outlineVBO;
     Vector3i highlightedBlock;
     bool hasHighlightedBlock = false;
+    int lastPlayerChunkX = -999;
+    int lastPlayerChunkZ = -999;
 
-    Game() : shader(nullptr), outlineShader(nullptr), player(SPAWN_X, SPAWN_Y, SPAWN_Z) { std::cout << "Game Constructed - Player Spawn: (" << SPAWN_X << ", " << SPAWN_Y << ", " << SPAWN_Z << ")" << std::endl; }
+    Game() : shader(nullptr), outlineShader(nullptr), player(SPAWN_X, SPAWN_Y, SPAWN_Z) { 
+        std::cout << "Game Constructed - Player Spawn: (" << SPAWN_X << ", " << SPAWN_Y << ", " << SPAWN_Z << ")" << std::endl;
+    }
 
     void init() {
         std::cout << "Game initialisation has started..." << std::endl;
@@ -115,6 +119,17 @@ public:
         // Initialise and generate the world
         world.initialise();
 
+        // Load initial chunks around spawn
+        std::cout << "Loading initial chunks around spawn..." << std::endl;
+        world.loadChunksAroundPosition(SPAWN_X, SPAWN_Z);
+        
+        // Generate initial chunk meshes
+        std::cout << "Generating initial chunk meshes..." << std::endl;
+        for (const auto& coord : world.getLoadedChunks()) {
+            meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+        }
+        std::cout << "Loaded " << world.getLoadedChunks().size() << " chunks" << std::endl;
+
         // Set player's starting position based on terrain height
         int startX = WORLD_SIZE_X / 2;
         int startZ = WORLD_SIZE_Z / 2;
@@ -129,6 +144,10 @@ public:
         camera.x = SPAWN_X;
         camera.y = SPAWN_Y;
         camera.z = SPAWN_Z;
+        
+        // Track player chunk position
+        lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
+        lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
 
         // Get initial canvas size
         int canvasWidth, canvasHeight;
@@ -136,12 +155,6 @@ public:
 
         // Initialise projection matrix with dynamic aspect ratio
         projection = perspective(CAM_FOV * M_PI / 180.0f, static_cast<float>(canvasWidth) / static_cast<float>(canvasHeight), 0.1f, 1000.0f);
-
-        // Generate the mesh based on the world data
-        mesh.generate(world);
-
-        // Setup mesh buffers
-        mesh.setup();
 
         // Enable depth testing and face culling
         glEnable(GL_DEPTH_TEST);
@@ -158,6 +171,8 @@ public:
         applyPhysics(deltaTime);
         if (isMoving) bobbingTime += deltaTime;
         updateHighlightedBlock();
+        updateChunks(); // Handle chunk loading/unloading
+        meshManager.updateDirtyChunks(world); // Regenerate modified chunks
         render();
     }
 
@@ -168,6 +183,30 @@ public:
         if (keyCode == 32 && pressed && player.onGround) {
             player.velocityY = JUMP_VELOCITY;
             player.onGround = false;
+        }
+        
+        // Check for double-tap on W key (forward) to toggle sprint
+        if (keyCode == 87) { // W key
+            if (pressed && !lastWKeyState) {
+                // W key just pressed
+                float timeSinceLastPress = currentTime - lastWKeyPressTime;
+                if (timeSinceLastPress < DOUBLE_TAP_TIME) {
+                    // Double tap detected - toggle sprint
+                    isSprinting = true;
+                }
+                lastWKeyPressTime = currentTime;
+            }
+            lastWKeyState = pressed;
+            
+            // Exit sprint if W key is released
+            if (!pressed && isSprinting) {
+                isSprinting = false;
+            }
+        }
+        
+        // Exit sprint if moving backwards or sideways only
+        if (keyCode == 83 && pressed) { // S key (backward)
+            isSprinting = false;
         }
     }
 
@@ -181,16 +220,34 @@ public:
         float maxDistance = 4.5f;
         RaycastHit hit = raycast(maxDistance);
         if (hit.hit) {
-            if (button == 0) removeBlock(hit.blockPosition.x, hit.blockPosition.y, hit.blockPosition.z);
-            else if (button == 2) placeBlock(hit.adjacentPosition.x, hit.adjacentPosition.y, hit.adjacentPosition.z);
-
-            if (button == 0 || button == 2) {
-                // Regen the mesh
-                mesh.vertices.clear();
-                mesh.indices.clear();
-                mesh.generate(world);
-                mesh.setup();
+            if (button == 0) {
+                removeBlock(hit.blockPosition.x, hit.blockPosition.y, hit.blockPosition.z);
             }
+            else if (button == 2) {
+                placeBlock(hit.adjacentPosition.x, hit.adjacentPosition.y, hit.adjacentPosition.z);
+            }
+        }
+    }
+
+    void updateChunks() {
+        // Check if player moved to a new chunk
+        int currentChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
+        int currentChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
+        
+        if (currentChunkX != lastPlayerChunkX || currentChunkZ != lastPlayerChunkZ) {
+            // Player moved to new chunk, update loaded chunks
+            world.loadChunksAroundPosition(player.x, player.z);
+            world.unloadDistantChunks(player.x, player.z);
+            
+            // Generate meshes for newly loaded chunks
+            for (const auto& coord : world.getLoadedChunks()) {
+                if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
+                    meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                }
+            }
+            
+            lastPlayerChunkX = currentChunkX;
+            lastPlayerChunkZ = currentChunkZ;
         }
     }
 
@@ -211,6 +268,12 @@ private:
     float bobbingHorizontalOffset = 0.0f;
     bool isMoving = false;
     float deltaTime = 0.0f;
+    
+    // Sprint state tracking
+    bool isSprinting = false;
+    bool lastWKeyState = false;
+    float lastWKeyPressTime = 0.0f;
+    float currentTime = 0.0f;
 
     float calculateDeltaTime() {
         auto now = std::chrono::steady_clock::now();
@@ -260,6 +323,30 @@ private:
             player.z = SPAWN_Z;
             player.velocityY = 0;
             player.onGround = true;
+            
+            // Update camera position to match respawn
+            camera.x = SPAWN_X;
+            camera.y = SPAWN_Y;
+            camera.z = SPAWN_Z;
+            
+            // Update chunk tracking to force chunk reload around spawn
+            lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
+            lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
+            
+            // Reload chunks around spawn position
+            world.loadChunksAroundPosition(SPAWN_X, SPAWN_Z);
+            world.unloadDistantChunks(SPAWN_X, SPAWN_Z);
+            
+            // Generate meshes for chunks around spawn
+            for (const auto& coord : world.getLoadedChunks()) {
+                if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
+                    meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                } else {
+                    // Regenerate existing chunk meshes to ensure they're up to date
+                    meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                }
+            }
+            
             return;
         }
 
@@ -289,7 +376,12 @@ private:
 
     // Handle player input
     void processInput(float dt) {
-        float velocity = PLAYER_SPEED * dt;
+        // Update current time for sprint tracking
+        currentTime += dt;
+        
+        // Determine effective speed (normal or sprint)
+        float speed = isSprinting ? SPRINT_SPEED : PLAYER_SPEED;
+        float velocity = speed * dt;
         float radYaw = camera.yaw * M_PI / 180.0f;
 
         float frontX = cosf(radYaw);
@@ -303,6 +395,11 @@ private:
         if (keys[83]) { moveX -= frontX * velocity; moveZ -= frontZ * velocity; } // S
         if (keys[65]) { moveX -= rightX * velocity; moveZ -= rightZ * velocity; } // A
         if (keys[68]) { moveX += rightX * velocity; moveZ += rightZ * velocity; } // D
+
+        // Exit sprint if not pressing forward
+        if (!keys[87] && isSprinting) {
+            isSprinting = false;
+        }
 
         // Detect if the player is moving
         isMoving = (moveX != 0.0f || moveZ != 0.0f);
@@ -318,64 +415,62 @@ private:
     }
 
     void removeBlock(int x, int y, int z) {
-        if (x >= 0 && x < WORLD_SIZE_X && y >= 0 && y < WORLD_SIZE_Y && z >= 0 && z < WORLD_SIZE_Z) {
-            int cx = x / CHUNK_SIZE;
-            int cy = y / CHUNK_HEIGHT;
-            int cz = z / CHUNK_SIZE;
-            int blockX = x % CHUNK_SIZE;
-            int blockY = y % CHUNK_HEIGHT;
-            int blockZ = z % CHUNK_SIZE;
-
-            if (world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].type == BLOCK_BEDROCK) return;
-
-            world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].isSolid = false;
-        }
+        Block* block = world.getBlockAt(x, y, z);
+        if (!block) return;
+        
+        // Don't remove bedrock
+        if (block->type == BLOCK_BEDROCK) return;
+        
+        block->isSolid = false;
+        
+        // Mark chunk as dirty
+        int cx = x / CHUNK_SIZE;
+        int cy = y / CHUNK_HEIGHT;
+        int cz = z / CHUNK_SIZE;
+        world.markChunkDirty(cx, cy, cz);
     }
 
     void placeBlock(int x, int y, int z) {
-        if (x >= 0 && x < WORLD_SIZE_X && y >= 0 && y < WORLD_SIZE_Y && z >= 0 && z < WORLD_SIZE_Z) {
+        Block* block = world.getBlockAt(x, y, z);
+        if (!block) return;
+        
+        // Don't place a block if there's already a solid block there
+        if (block->isSolid) return;
+        
+        // Prevent placing a block inside the player's bounding box
+        float halfWidth = 0.3f;
+        float halfDepth = 0.3f;
+        
+        // Player bounding box
+        float playerMinX = player.x - halfWidth;
+        float playerMaxX = player.x + halfWidth;
+        float playerMinY = player.y;
+        float playerMaxY = player.y + PLAYER_HEIGHT;
+        float playerMinZ = player.z - halfDepth;
+        float playerMaxZ = player.z + halfDepth;
+        
+        // Block bounding box
+        float blockMinX = x;
+        float blockMaxX = x + 1.0f;
+        float blockMinY = y;
+        float blockMaxY = y + 1.0f;
+        float blockMinZ = z;
+        float blockMaxZ = z + 1.0f;
+        
+        // Check for AABB overlap
+        bool overlaps = (playerMinX < blockMaxX && playerMaxX > blockMinX) &&
+                       (playerMinY < blockMaxY && playerMaxY > blockMinY) &&
+                       (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
+        
+        if (!overlaps) {
+            block->isSolid = true;
+            block->type = BLOCK_PLANKS;
+            
+            // Mark chunk as dirty
             int cx = x / CHUNK_SIZE;
             int cy = y / CHUNK_HEIGHT;
             int cz = z / CHUNK_SIZE;
-            int blockX = x % CHUNK_SIZE;
-            int blockY = y % CHUNK_HEIGHT;
-            int blockZ = z % CHUNK_SIZE;
-
-            // Don't place a block if there's already a solid block there
-            if (world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].isSolid) {
-                return;
-            }
-
-            // Prevent placing a block inside the player's bounding box
-            // Check if the block overlaps with player's AABB (feet to head)
-            float halfWidth = 0.3f;
-            float halfDepth = 0.3f;
-            
-            // Player bounding box
-            float playerMinX = player.x - halfWidth;
-            float playerMaxX = player.x + halfWidth;
-            float playerMinY = player.y;
-            float playerMaxY = player.y + PLAYER_HEIGHT;
-            float playerMinZ = player.z - halfDepth;
-            float playerMaxZ = player.z + halfDepth;
-            
-            // Block bounding box
-            float blockMinX = x;
-            float blockMaxX = x + 1.0f;
-            float blockMinY = y;
-            float blockMaxY = y + 1.0f;
-            float blockMinZ = z;
-            float blockMaxZ = z + 1.0f;
-            
-            // Check for AABB overlap
-            bool overlaps = (playerMinX < blockMaxX && playerMaxX > blockMinX) &&
-                           (playerMinY < blockMaxY && playerMaxY > blockMinY) &&
-                           (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
-            
-            if (!overlaps) {
-                world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].isSolid = true;
-                world.chunks[cx][cy][cz].blocks[blockX][blockY][blockZ].type = BLOCK_PLANKS; // Set to desired block type
-            }
+            world.markChunkDirty(cx, cy, cz);
         }
     }
 
@@ -389,9 +484,7 @@ private:
         RaycastHit hitResult;
         hitResult.hit = false;
         Vector3 rayOrigin = { camera.x, camera.y, camera.z };
-        Vector3 rayDirection = camera.getFrontVector();
-
-        // Normalise the direction
+        Vector3 rayDirection = camera.getFrontVector();        // Normalise the direction
         float dirLength = sqrt(rayDirection.x * rayDirection.x + rayDirection.y * rayDirection.y + rayDirection.z * rayDirection.z);
         rayDirection.x /= dirLength;
         rayDirection.y /= dirLength;
@@ -605,8 +698,8 @@ private:
         mat4 mvp = multiply(projection, view);
         glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp.data);
 
-        // Draw the mesh
-        mesh.draw();
+        // Draw visible chunk meshes
+        meshManager.drawVisibleChunks(player.x, player.z);
 
         // Draw block outline if a block is being looked at
         if (hasHighlightedBlock) {
