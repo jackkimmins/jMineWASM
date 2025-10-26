@@ -164,6 +164,8 @@ private:
             case BLOCK_BEDROCK: return 5;
             case BLOCK_COAL_ORE: return 6;
             case BLOCK_IRON_ORE: return 7;
+            case BLOCK_LOG: return 8;
+            case BLOCK_LEAVES: return 9;
             default: return 0;
         }
     }

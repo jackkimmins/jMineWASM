@@ -14,6 +14,7 @@ public:
     Player player;
     mat4 projection;
     GLint mvpLoc;
+    GLint timeLoc;
     GLint outlineMvpLoc;
     std::chrono::steady_clock::time_point lastFrame;
     bool keys[1024] = { false };
@@ -50,9 +51,29 @@ public:
             in vec2 TexCoord;
             in float AO;
             uniform sampler2D uTexture;
+            uniform float uTime;
             out vec4 FragColor;
             void main() {
-                vec4 texColor = texture(uTexture, TexCoord);
+                vec2 texCoord = TexCoord;
+                
+                // Water animation: check if we're in water texture range (tiles 10-13)
+                float tileWidth = 16.0 / 240.0;
+                float tileX = floor(texCoord.x / tileWidth);
+                
+                if (tileX >= 10.0 && tileX < 14.0) {
+                    // Animated water texture
+                    float frame = mod(floor(uTime * 2.0), 4.0); // 2 FPS, 4 frames
+                    float offsetX = frame * tileWidth;
+                    texCoord.x = mod(texCoord.x, tileWidth) + 10.0 * tileWidth + offsetX;
+                }
+                
+                vec4 texColor = texture(uTexture, texCoord);
+                
+                // Make water semi-transparent
+                if (tileX >= 10.0 && tileX < 14.0) {
+                    texColor.a *= 0.7; // 70% opacity for water
+                }
+                
                 texColor.rgb *= 1.0 - AO; // Apply AO to darken the color
                 FragColor = texColor;
             })";
@@ -61,6 +82,7 @@ public:
         shader = new Shader(vertexSrc, fragmentSrc);
         shader->use();
         mvpLoc = shader->getUniform("uMVP");
+        timeLoc = shader->getUniform("uTime");
 
         // Load Texture Atlas
         glGenTextures(1, &textureAtlas);
@@ -161,12 +183,17 @@ public:
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
+        
+        // Enable blending for transparency
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         lastFrame = std::chrono::steady_clock::now();
     }
 
     void mainLoop() {
         deltaTime = calculateDeltaTime();
+        gameTime += deltaTime; // Accumulate time for animations
         processInput(deltaTime);
         applyPhysics(deltaTime);
         if (isMoving) bobbingTime += deltaTime;
@@ -267,6 +294,7 @@ private:
     float bobbingOffset = 0.0f;
     float bobbingHorizontalOffset = 0.0f;
     bool isMoving = false;
+    float gameTime = 0.0f;
     float deltaTime = 0.0f;
     
     // Sprint state tracking
@@ -697,6 +725,9 @@ private:
         mat4 view = camera.getViewMatrix();
         mat4 mvp = multiply(projection, view);
         glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp.data);
+        
+        // Pass time to shader for water animation
+        glUniform1f(timeLoc, gameTime);
 
         // Draw visible chunk meshes
         meshManager.drawVisibleChunks(player.x, player.z);

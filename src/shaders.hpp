@@ -3,12 +3,11 @@
 #ifndef SHADERS_HPP
 #define SHADERS_HPP
 
-// Shader Class
 class Shader {
 public:
     GLuint program;
 
-    // Constructor that compiles and links the shader
+    // Compile and link the shader
     Shader(const char* vertexSrc, const char* fragmentSrc) {
         GLuint vertex = compile(GL_VERTEX_SHADER, vertexSrc);
         GLuint fragment = compile(GL_FRAGMENT_SHADER, fragmentSrc);
@@ -26,7 +25,7 @@ public:
     ~Shader() { glDeleteProgram(program); }
 
 private:
-    // Compile the GLSL source code
+    // Compile GLSL source code
     GLuint compile(GLenum type, const char* source) {
         GLuint shader = glCreateShader(type);
         glShaderSource(shader, 1, &source, nullptr);
@@ -35,7 +34,7 @@ private:
         return shader;
     }
 
-    // Verify the compilation status
+    // Verify compilation status
     void checkCompile(GLuint shader, GLenum type) {
         GLint success;
         glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
@@ -48,7 +47,7 @@ private:
         }
     }
 
-    // Verify the linking status
+    // Verify linking status
     void checkLink() {
         GLint success;
         glGetProgramiv(program, GL_LINK_STATUS, &success);

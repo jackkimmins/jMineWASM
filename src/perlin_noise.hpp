@@ -1,151 +1,143 @@
 #ifndef PERLIN_NOISE_HPP
 #define PERLIN_NOISE_HPP
 
-#include <vector>
-#include <numeric>
-#include <algorithm>
+#include <array>
 #include <random>
+#include <algorithm>
 #include <cmath>
-
-// Inspired by https://stackoverflow.com/questions/29711668/perlin-noise-generation
 
 class PerlinNoise {
 public:
-    // Constructors
-    PerlinNoise();
-    PerlinNoise(unsigned int seed);
+    explicit PerlinNoise(unsigned int seed = 0) {
+        // Initialise identity permutation 0..255
+        for (int i = 0; i < 256; ++i) perm[i] = i;
 
-    // Get a noise value for 2D
-    double noise(double x, double y) const;
+        // Shuffle first 256 values using seed
+        std::mt19937 engine(seed);
+        std::shuffle(perm.begin(), perm.begin() + 256, engine);
 
-    // Get a noise value for 3D
-    double noise(double x, double y, double z) const;
+        // Duplicate the permutation to avoid overflow in indexing (512-length table)
+        for (int i = 0; i < 256; ++i) perm[256 + i] = perm[i];
+    }
+
+    double noise(double x, double y) const {
+        // Find unit grid cell containing the point
+        int X = (int)std::floor(x) & 255;  // lattice X index (mod 256)
+        int Y = (int)std::floor(y) & 255;  // lattice Y index (mod 256)
+
+        // Local coordinates within cell (fractional part)
+        double fx = x - std::floor(x);
+        double fy = y - std::floor(y);
+
+        // Compute fade curves for x and y
+        double u = fade(fx);
+        double v = fade(fy);
+
+        // Hash corner indices via permutation table
+        int A = perm[X] + Y;
+        int B = perm[X + 1] + Y;
+
+        // Compute corner contributions (gradient dot product with relative position)
+        double n00 = grad(perm[A], fx, fy);
+        double n10 = grad(perm[B], fx - 1, fy);
+        double n01 = grad(perm[A + 1], fx, fy - 1);
+        double n11 = grad(perm[B + 1], fx - 1, fy - 1);
+
+        // Bilinear interpolation of the four corners
+        double nx0 = lerp(n00, n10, u);  // interpolate along x for y0
+        double nx1 = lerp(n01, n11, u);  // interpolate along x for y1
+        double nxy = lerp(nx0, nx1, v);  // interpolate along y
+
+        return nxy;
+    }
+
+    double noise(double x, double y, double z) const {
+        // Find unit grid cell containing point
+        int X = (int)std::floor(x) & 255;  // lattice X index
+        int Y = (int)std::floor(y) & 255;  // lattice Y index
+        int Z = (int)std::floor(z) & 255;  // lattice Z index
+
+        // Local coordinates within the cell
+        double fx = x - std::floor(x);
+        double fy = y - std::floor(y);
+        double fz = z - std::floor(z);
+
+        // Compute fade curves for x, y, z
+        double u = fade(fx);
+        double v = fade(fy);
+        double w = fade(fz);
+
+        // Hash coordinates of the cube's eight corners
+        int A  = perm[X] + Y;
+        int AA = perm[A] + Z;
+        int AB = perm[A + 1] + Z;
+        int B  = perm[X + 1] + Y;
+        int BA = perm[B] + Z;
+        int BB = perm[B + 1] + Z;
+
+        // Compute corner contributions (gradient dot products)
+        double n000 = grad(perm[AA],     fx,     fy,     fz);
+        double n100 = grad(perm[BA],     fx - 1, fy,     fz);
+        double n010 = grad(perm[AB],     fx,     fy - 1, fz);
+        double n110 = grad(perm[BB],     fx - 1, fy - 1, fz);
+        double n001 = grad(perm[AA + 1], fx,     fy,     fz - 1);
+        double n101 = grad(perm[BA + 1], fx - 1, fy,     fz - 1);
+        double n011 = grad(perm[AB + 1], fx,     fy - 1, fz - 1);
+        double n111 = grad(perm[BB + 1], fx - 1, fy - 1, fz - 1);
+
+        // Trilinear interpolation of the eight corners
+        double nx00 = lerp(n000, n100, u); // interpolate along x (layer z0, y0)
+        double nx10 = lerp(n010, n110, u); // interpolate along x (layer z0, y1)
+        double nx01 = lerp(n001, n101, u); // interpolate along x (layer z1, y0)
+        double nx11 = lerp(n011, n111, u); // interpolate along x (layer z1, y1)
+        double nxy0 = lerp(nx00, nx10, v); // interpolate along y (for z0)
+        double nxy1 = lerp(nx01, nx11, v); // interpolate along y (for z1)
+        double nxyz = lerp(nxy0, nxy1, w); // interpolate along z
+        
+        return nxyz;
+    }
 
 private:
-    std::vector<int> p; // Permutation vector
-    double fade(double t) const;
-    double lerp(double a, double b, double t) const;
-    double grad(int hash, double x, double y, double z) const;
+    std::array<int, 512> perm;
+
+    // Pre-defined gradient directions for 2D (8 directions).
+    static constexpr double grad2[8][2] = {
+        { 1.0,  0.0},  {-1.0,  0.0},  { 0.0,  1.0},  { 0.0, -1.0},
+        { 0.70710678,  0.70710678},  {-0.70710678,  0.70710678},
+        { 0.70710678, -0.70710678},  {-0.70710678, -0.70710678}
+    };
+
+    // Pre-defined gradient directions for 3D (16 directions, each of length sqroot(2)).
+    static constexpr double grad3[16][3] = {
+        { 1.0,  1.0,  0.0},  {-1.0,  1.0,  0.0},  { 1.0, -1.0,  0.0},  {-1.0, -1.0,  0.0},
+        { 1.0,  0.0,  1.0},  {-1.0,  0.0,  1.0},  { 1.0,  0.0, -1.0},  {-1.0,  0.0, -1.0},
+        { 0.0,  1.0,  1.0},  { 0.0, -1.0,  1.0},  { 0.0,  1.0, -1.0},  { 0.0, -1.0, -1.0},
+        { 1.0,  1.0,  0.0},  {-1.0,  1.0,  0.0},  { 0.0, -1.0,  1.0},  { 0.0, -1.0, -1.0}
+    };
+
+    // Quintic fade function
+    static inline double fade(double t) {
+        return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+
+    // Linear interpolation
+    static inline double lerp(double a, double b, double t) {
+        return a + t * (b - a);
+    }
+
+    // Compute dot product of the selected 2D gradient with (x, y)
+    static inline double grad(int hash, double x, double y) {
+        int h = hash & 7; // only lower 3 bits to get 8 possible directions
+        const double *g = grad2[h];
+        return g[0] * x + g[1] * y;
+    }
+
+    // Compute dot product of the selected 3D gradient with (x, y, z)
+    static inline double grad(int hash, double x, double y, double z) {
+        int h = hash & 15; // lower 4 bits for 16 directions
+        const double *g = grad3[h];
+        return g[0] * x + g[1] * y + g[2] * z;
+    }
 };
 
-////////////////////////////////////////////////////////////////////////////////
-// Implementation
-////////////////////////////////////////////////////////////////////////////////
-
-PerlinNoise::PerlinNoise() {
-    // Initialise permutation vector with values from 0 to 255
-    p.resize(256);
-    std::iota(p.begin(), p.end(), 0);
-    // Shuffle the permutation vector without a seed for default behavior
-    std::random_device rd;
-    std::mt19937 engine(rd());
-    std::shuffle(p.begin(), p.end(), engine);
-    // Duplicate the permutation vector
-    p.insert(p.end(), p.begin(), p.end());
-}
-
-PerlinNoise::PerlinNoise(unsigned int seed) {
-    p.resize(256);
-    // Fill p with values from 0 to 255
-    std::iota(p.begin(), p.end(), 0);
-    // Shuffle using the seed
-    std::default_random_engine engine(seed);
-    std::shuffle(p.begin(), p.end(), engine);
-    // Duplicate the permutation vector
-    p.insert(p.end(), p.begin(), p.end());
-}
-
-double PerlinNoise::noise(double x, double y) const {
-    // Find unit grid cell containing point
-    int X = (int)floor(x) & 255;
-    int Y = (int)floor(y) & 255;
-
-    // Get relative xy coordinates of point within that cell
-    x -= floor(x);
-    y -= floor(y);
-
-    // Compute fade curves for x and y
-    double u = fade(x);
-    double v = fade(y);
-
-    // Hash coordinates of the square corners
-    int aa = p[p[X] + Y];
-    int ab = p[p[X] + Y + 1];
-    int ba = p[p[X + 1] + Y];
-    int bb = p[p[X + 1] + Y + 1];
-
-    // Add blended results from the corners
-    double res = lerp(v,
-                      lerp(u, grad(aa, x, y, 0), grad(ba, x - 1, y, 0)),
-                      lerp(u, grad(ab, x, y - 1, 0), grad(bb, x - 1, y - 1, 0))
-                     );
-    return res;
-}
-
-double PerlinNoise::noise(double x, double y, double z) const {
-    // Find unit grid cell containing point
-    int X = (int)floor(x) & 255;
-    int Y = (int)floor(y) & 255;
-    int Z = (int)floor(z) & 255;
-
-    // Get relative xyz coordinates of point within that cell
-    x -= floor(x);
-    y -= floor(y);
-    z -= floor(z);
-
-    // Compute fade curves for x, y, z
-    double u = fade(x);
-    double v = fade(y);
-    double w = fade(z);
-
-    // Hash coordinates of the cube corners
-    int aaa = p[p[p[X] + Y] + Z];
-    int aba = p[p[p[X] + Y + 1] + Z];
-    int aab = p[p[p[X] + Y] + Z + 1];
-    int abb = p[p[p[X] + Y + 1] + Z + 1];
-    int baa = p[p[p[X + 1] + Y] + Z];
-    int bba = p[p[p[X + 1] + Y + 1] + Z];
-    int bab = p[p[p[X + 1] + Y] + Z + 1];
-    int bbb = p[p[p[X + 1] + Y + 1] + Z + 1];
-
-    // Add blended results from the corners
-    double res = lerp(w,
-                      lerp(v,
-                           lerp(u, grad(aaa, x, y, z), grad(baa, x - 1, y, z)),
-                           lerp(u, grad(aba, x, y - 1, z), grad(bba, x - 1, y - 1, z))
-                      ),
-                      lerp(v,
-                           lerp(u, grad(aab, x, y, z - 1), grad(bab, x - 1, y, z - 1)),
-                           lerp(u, grad(abb, x, y - 1, z - 1), grad(bbb, x - 1, y - 1, z - 1))
-                      )
-                     );
-
-    return res;
-}
-
-double PerlinNoise::fade(double t) const {
-    // 6t^5 - 15t^4 + 10t^3
-    return t * t * t * (t * (t * 6 - 15) + 10);
-}
-
-double PerlinNoise::lerp(double a, double b, double t) const {
-    return a + t * (b - a);
-}
-
-double PerlinNoise::grad(int hash, double x, double y, double z) const {
-    // Convert low 4 bits of hash code into 12 gradient directions
-    int h = hash & 15;  // Take the first 4 bits of the hash
-    double u = h < 8 ? x : y;
-    double v;
-
-    if (h < 4)
-        v = y;
-    else if (h == 12 || h == 14)
-        v = x;
-    else
-        v = z;
-
-    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
-}
-
-#endif
+#endif // PERLIN_NOISE_HPP

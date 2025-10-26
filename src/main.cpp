@@ -16,7 +16,7 @@ constexpr int CHUNK_HEIGHT = 16;
 
 // World is 64x64 chunks (1024x1024 blocks)
 constexpr int WORLD_CHUNK_SIZE_X = 64;
-constexpr int WORLD_CHUNK_SIZE_Y = 3;
+constexpr int WORLD_CHUNK_SIZE_Y = 6;
 constexpr int WORLD_CHUNK_SIZE_Z = 64;
 
 constexpr int WORLD_SIZE_X = CHUNK_SIZE * WORLD_CHUNK_SIZE_X;
@@ -29,7 +29,7 @@ constexpr int CHUNK_LOAD_DISTANCE = RENDER_DISTANCE + 2; // Load slightly more t
 
 // The world spawn position is the calculated centre of the world.
 constexpr float SPAWN_X = WORLD_SIZE_X / 2.0f;
-constexpr float SPAWN_Y = WORLD_SIZE_Y + 1.6f;
+constexpr float SPAWN_Y = WORLD_SIZE_Y + 100.6f;
 constexpr float SPAWN_Z = WORLD_SIZE_Z / 2.0f;
 
 // Input Handling
@@ -69,6 +69,9 @@ constexpr float CAVE_RADIUS_MIN = 1.0f;
 constexpr float CAVE_RADIUS_MAX = 4.0f;
 constexpr float CAVE_DIRECTION_CHANGE = 0.2f;
 
+// Water Generation Constants
+constexpr int WATER_LEVEL = 32; // Sea level - air blocks below this become water
+
 // Ore Generation Constants
 constexpr int COAL_ORE_MIN_Y = 5;
 constexpr int COAL_ORE_MAX_Y = 50;
@@ -80,9 +83,12 @@ constexpr float IRON_ORE_CHANCE = 0.015f;
 
 // Texture Atlas and Ambient Occlusion
 constexpr int ATLAS_TILE_SIZE = 16;
-constexpr int ATLAS_TILES_WIDTH = 160;
+constexpr int ATLAS_TILES_WIDTH = 240;
 constexpr int ATLAS_TILES_HEIGHT = 16;
 constexpr float AO_STRENGTH = 0.5f;
+
+// Water Animation
+constexpr float WATER_ANIMATION_SPEED = 2.0f; // Frames per second
 
 // Utility Matrix Structure
 struct mat4 { float data[16] = {0}; };
