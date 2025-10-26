@@ -14,7 +14,6 @@ public:
         float frontX = cosf(radYaw) * cosf(radPitch);
         float frontY = sinf(radPitch);
         float frontZ = sinf(radYaw) * cosf(radPitch);
-
         return lookAt(x, y, z, x + frontX, y + frontY, z + frontZ, 0.0f, 1.0f, 0.0f);
     }
 
@@ -36,9 +35,7 @@ public:
     }
 
 private:
-    mat4 lookAt(float eyeX, float eyeY, float eyeZ,
-               float centerX, float centerY, float centerZ,
-               float upX, float upY, float upZ) const {
+    mat4 lookAt(float eyeX, float eyeY, float eyeZ, float centerX, float centerY, float centerZ, float upX, float upY, float upZ) const {
         float f[3] = { centerX - eyeX, centerY - eyeY, centerZ - eyeZ };
         float f_mag = std::sqrt(f[0]*f[0] + f[1]*f[1] + f[2]*f[2]);
         for(auto &val : f) val /= f_mag;
