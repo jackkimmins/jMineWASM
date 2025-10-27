@@ -1,5 +1,4 @@
-// mesh.hpp - WATER PASS + LEAF TRANSPARENCY & Z-FIGHTING FIX
-// (unchanged except for context; left here for completeness)
+// mesh.hpp
 #ifndef MESH_HPP
 #define MESH_HPP
 

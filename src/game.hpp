@@ -15,7 +15,7 @@ public:
     GLint mvpLoc;
     GLint timeLoc;
 
-    // Fog stuff:
+    // Fog stuff
     GLint camPosLoc;
     GLint fogStartLoc;
     GLint fogEndLoc;
@@ -603,7 +603,7 @@ private:
         float baseSpeed = isSprinting ? SPRINT_SPEED : PLAYER_SPEED;
         if (isFlying) {
             baseSpeed = FLY_SPEED;
-            isSprinting = false; // sprint irrelevant while flying
+            isSprinting = false;
         }
         float distance = baseSpeed * dt;
 
@@ -614,7 +614,7 @@ private:
         float rightX = -sinf(radYaw);
         float rightZ = cosf(radYaw);
 
-        // Movement deltas (horizontal only; vertical handled in physics, esp. fly)
+        // Movement deltas
         float deltaX = 0.0f;
         float deltaZ = 0.0f;
 
@@ -640,7 +640,7 @@ private:
         // Determine if the player is trying to move (for bobbing effect)
         isMoving = (deltaX != 0.0f || deltaZ != 0.0f) && !isFlying; // no bobbing in fly
 
-        // *** Preload chunks for the intended destination to avoid stepping into unknown space ***
+        // Preload chunks for the intended destination
         if (deltaX != 0.0f || deltaZ != 0.0f) {
             world.loadChunksAroundPosition(player.x + deltaX, player.z + deltaZ);
             world.unloadDistantChunks(player.x + deltaX, player.z + deltaZ);
@@ -652,26 +652,18 @@ private:
         }
 
         // Attempt horizontal movement with collision checks
-        if (!isColliding(player.x + deltaX, player.y, player.z)) {
-            player.x += deltaX;
-        }
-        if (!isColliding(player.x, player.y, player.z + deltaZ)) {
-            player.z += deltaZ;
-        }
+        if (!isColliding(player.x + deltaX, player.y, player.z)) player.x += deltaX;
+        if (!isColliding(player.x, player.y, player.z + deltaZ)) player.z += deltaZ;
 
         // If the player stopped pressing forward, stop sprinting
-        if (!keys[87] && isSprinting) {
-            isSprinting = false;
-        }
+        if (!keys[87] && isSprinting) isSprinting = false;
 
-        // If flying and we happen to be on ground (e.g., brushed a slope), stop flying
+        // If flying and we happen to be on ground, stop flying
         if (isFlying) {
             checkGround();
-            if (player.onGround) {
-                isFlying = false;
-            }
+            if (player.onGround) isFlying = false;
         } else {
-            // After moving, verify if still on ground (e.g., stepped off a ledge)
+            // After moving, verify if still on ground
             checkGround();
         }
     }
@@ -679,7 +671,10 @@ private:
     void removeBlock(int x, int y, int z) {
         Block* block = world.getBlockAt(x, y, z);
         if (!block) return;
-        if (block->type == BLOCK_BEDROCK) return;  // cannot remove bedrock
+
+        // Bedrock cannot be removed
+        if (block->type == BLOCK_BEDROCK) return;
+
         block->isSolid = false;
         // Mark the chunk containing this block as dirty to update its mesh
         int cx = x / CHUNK_SIZE;
@@ -691,7 +686,8 @@ private:
     void placeBlock(int x, int y, int z) {
         Block* block = world.getBlockAt(x, y, z);
         if (!block) return;
-        if (block->isSolid) return;  // cannot place if space is already occupied
+        if (block->isSolid) return;
+
         // Prevent placing blocks inside the player's own bounding box
         float halfWidth = 0.3f;
         float halfDepth = 0.3f;
@@ -710,13 +706,13 @@ private:
         bool overlapsPlayer = (playerMinX < blockMaxX && playerMaxX > blockMinX) &&
                                (playerMinY < blockMaxY && playerMaxY > blockMinY) &&
                                (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
-        if (overlapsPlayer) {
-            return; // don't place a block where the player is standing
-        }
-        // Place the new block
+        if (overlapsPlayer) return;
+
+        // Place new block
         block->isSolid = true;
         block->type = BLOCK_PLANKS;
-        // Mark the chunk as dirty to refresh the mesh (including neighbors for faces)
+
+        // Mark the chunk as dirty to refresh mesh
         int cx = x / CHUNK_SIZE;
         int cy = y / CHUNK_HEIGHT;
         int cz = z / CHUNK_SIZE;
@@ -734,22 +730,26 @@ private:
         result.hit = false;
         Vector3 origin = { camera.x, camera.y, camera.z };
         Vector3 direction = camera.getFrontVector();
-        // Normalize direction vector
+
+        // Normalise direction vector
         float len = std::sqrt(direction.x*direction.x + direction.y*direction.y + direction.z*direction.z);
         if (len != 0) {
             direction.x /= len;
             direction.y /= len;
             direction.z /= len;
         }
+
         // Starting block coordinates
         int bx = static_cast<int>(std::floor(origin.x));
         int by = static_cast<int>(std::floor(origin.y));
         int bz = static_cast<int>(std::floor(origin.z));
         int prevX = bx, prevY = by, prevZ = bz;
+
         // Determine step direction for the ray
         int stepX = (direction.x >= 0 ? 1 : -1);
         int stepY = (direction.y >= 0 ? 1 : -1);
         int stepZ = (direction.z >= 0 ? 1 : -1);
+
         // Calculate initial tMax and tDelta for ray-grid intersection
         float tMaxX = intbound(origin.x, direction.x);
         float tMaxY = intbound(origin.y, direction.y);
@@ -758,15 +758,17 @@ private:
         float tDeltaY = (direction.y != 0 ? stepY / direction.y : INFINITY);
         float tDeltaZ = (direction.z != 0 ? stepZ / direction.z : INFINITY);
         float traveled = 0.0f;
+
         // Traverse the grid
         while (traveled <= maxDistance) {
             if (isBlockSolid(bx, by, bz)) {
-                // We hit a solid block
+                // Hit a solid block
                 result.hit = true;
                 result.blockPosition = { bx, by, bz };
                 result.adjacentPosition = { prevX, prevY, prevZ };
                 return result;
             }
+
             // Move to next grid cell
             prevX = bx;
             prevY = by;
@@ -793,7 +795,8 @@ private:
                 }
             }
         }
-        return result; // no block hit within range
+
+        return result;
     }
 
     float intbound(float s, float ds) {
@@ -810,59 +813,35 @@ private:
     }
 
     void renderBlockOutline(int x, int y, int z, const mat4& mvp) {
-        // Determine which block faces are exposed (not adjacent to another solid block)
-        bool frontFace  = !isBlockSolid(x,     y,     z - 1); // -Z face visible?
-        bool backFace   = !isBlockSolid(x,     y,     z + 1); // +Z face visible?
-        bool leftFace   = !isBlockSolid(x - 1, y,     z    ); // -X face visible?
-        bool rightFace  = !isBlockSolid(x + 1, y,     z    ); // +X face visible?
-        bool bottomFace = !isBlockSolid(x,     y - 1, z    ); // -Y face visible?
-        bool topFace    = !isBlockSolid(x,     y + 1, z    ); // +Y face visible?
-        float offset = 0.002f; // slight offset to avoid z-fighting
+        bool frontFace = !isBlockSolid(x, y, z - 1);
+        bool backFace = !isBlockSolid(x, y, z + 1);
+        bool leftFace = !isBlockSolid(x - 1, y, z);
+        bool rightFace = !isBlockSolid(x + 1, y, z);
+        bool bottomFace = !isBlockSolid(x, y - 1, z);
+        bool topFace = !isBlockSolid(x, y + 1, z);
+
+        float offset = 0.002f;
         float minX = x - offset, maxX = x + 1.0f + offset;
         float minY = y - offset, maxY = y + 1.0f + offset;
         float minZ = z - offset, maxZ = z + 1.0f + offset;
         std::vector<float> edges;
+
         // Construct outline edges based on visible faces
-        if (bottomFace || frontFace) {
-            edges.insert(edges.end(), { minX, minY, minZ,  maxX, minY, minZ }); // front-bottom edge
-        }
-        if (bottomFace || rightFace) {
-            edges.insert(edges.end(), { maxX, minY, minZ,  maxX, minY, maxZ }); // right-bottom edge
-        }
-        if (bottomFace || backFace) {
-            edges.insert(edges.end(), { maxX, minY, maxZ,  minX, minY, maxZ }); // back-bottom edge
-        }
-        if (bottomFace || leftFace) {
-            edges.insert(edges.end(), { minX, minY, maxZ,  minX, minY, minZ }); // left-bottom edge
-        }
-        if (topFace || frontFace) {
-            edges.insert(edges.end(), { minX, maxY, minZ,  maxX, maxY, minZ }); // front-top edge
-        }
-        if (topFace || rightFace) {
-            edges.insert(edges.end(), { maxX, maxY, minZ,  maxX, maxY, maxZ }); // right-top edge
-        }
-        if (topFace || backFace) {
-            edges.insert(edges.end(), { maxX, maxY, maxZ,  minX, maxY, maxZ }); // back-top edge
-        }
-        if (topFace || leftFace) {
-            edges.insert(edges.end(), { minX, maxY, maxZ,  minX, maxY, minZ }); // left-top edge
-        }
-        if (frontFace || leftFace) {
-            edges.insert(edges.end(), { minX, minY, minZ,  minX, maxY, minZ }); // front-left vertical
-        }
-        if (frontFace || rightFace) {
-            edges.insert(edges.end(), { maxX, minY, minZ,  maxX, maxY, minZ }); // front-right vertical
-        }
-        if (backFace || rightFace) {
-            edges.insert(edges.end(), { maxX, minY, maxZ,  maxX, maxY, maxZ }); // back-right vertical
-        }
-        if (backFace || leftFace) {
-            edges.insert(edges.end(), { minX, minY, maxZ,  minX, maxY, maxZ }); // back-left vertical
-        }
-        if (edges.empty()) {
-            return; // no outline needed if block is completely surrounded
-        }
-        // Render the outline using the outline shader
+        if (bottomFace || frontFace)    edges.insert(edges.end(), { minX, minY, minZ,  maxX, minY, minZ }); // front-bottom edge
+        if (bottomFace || rightFace)    edges.insert(edges.end(), { maxX, minY, minZ,  maxX, minY, maxZ }); // right-bottom edge
+        if (bottomFace || backFace)     edges.insert(edges.end(), { maxX, minY, maxZ,  minX, minY, maxZ }); // back-bottom edge
+        if (bottomFace || leftFace)     edges.insert(edges.end(), { minX, minY, maxZ,  minX, minY, minZ }); // left-bottom edge
+        if (topFace || frontFace)       edges.insert(edges.end(), { minX, maxY, minZ,  maxX, maxY, minZ }); // front-top edge
+        if (topFace || rightFace)       edges.insert(edges.end(), { maxX, maxY, minZ,  maxX, maxY, maxZ }); // right-top edge
+        if (topFace || backFace)        edges.insert(edges.end(), { maxX, maxY, maxZ,  minX, maxY, maxZ }); // back-top edge
+        if (topFace || leftFace)        edges.insert(edges.end(), { minX, maxY, maxZ,  minX, maxY, minZ }); // left-top edge
+        if (frontFace || leftFace)      edges.insert(edges.end(), { minX, minY, minZ,  minX, maxY, minZ }); // front-left vertical
+        if (frontFace || rightFace)     edges.insert(edges.end(), { maxX, minY, minZ,  maxX, maxY, minZ }); // front-right vertical
+        if (backFace || rightFace)      edges.insert(edges.end(), { maxX, minY, maxZ,  maxX, maxY, maxZ }); // back-right vertical
+        if (backFace || leftFace)       edges.insert(edges.end(), { minX, minY, maxZ,  minX, maxY, maxZ }); // back-left vertical
+        if (edges.empty()) return;
+
+        // Render outline using outline shader
         outlineShader->use();
         glUniformMatrix4fv(outlineMvpLoc, 1, GL_FALSE, mvp.data);
         glBindVertexArray(outlineVAO);
@@ -876,48 +855,42 @@ private:
     }
 
     void render() {
-        // Sync camera position with player (with bobbing offsets applied)
+        // Sync camera position with player
         camera.x = player.x;
         camera.y = player.y + 1.6f;
         camera.z = player.z;
 
-        // Smoothly apply head bobbing effect to camera position
+        // Smoothly apply head bobbing effect to cam position
         float targetBob = 0.0f;
         float targetBobHorizontal = 0.0f;
         if (isMoving) {
             targetBob = sin(bobbingTime * BOBBING_FREQUENCY) * BOBBING_AMPLITUDE;
             targetBobHorizontal = sin(bobbingTime * BOBBING_FREQUENCY * 2.0f) * BOBBING_HORIZONTAL_AMPLITUDE;
         }
-        // Interpolate bobbing for smooth movement
+
         bobbingOffset += (targetBob - bobbingOffset) * std::min(deltaTime * BOBBING_DAMPING_SPEED, 1.0f);
         bobbingHorizontalOffset += (targetBobHorizontal - bobbingHorizontalOffset) * std::min(deltaTime * BOBBING_DAMPING_SPEED, 1.0f);
-        // Apply bobbing to camera coordinates
         camera.y += bobbingOffset;
         Vector3 camRight = camera.getRightVector();
         camera.x += camRight.x * bobbingHorizontalOffset;
         camera.z += camRight.z * bobbingHorizontalOffset;
 
-        // Update viewport dimensions (in case of canvas resize)
         int width, height;
         emscripten_get_canvas_element_size("canvas", &width, &height);
         glViewport(0, 0, width, height);
-
-        // Update projection matrix for current aspect ratio
         projection = perspective(CAM_FOV * M_PI / 180.0f, (float)width / (float)height, 0.1f, 1000.0f);
 
         // Clear screen with sky color (same as fog color)
         glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Set up main shader and pass MVP matrix and time uniform
         shader->use();
         mat4 view = camera.getViewMatrix();
         mat4 mvp = multiply(projection, view);
         glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp.data);
         glUniform1f(timeLoc, gameTime);
 
-        // ---- Fog params (derived from render distance in blocks) ----
-        float renderRadius = float(RENDER_DISTANCE * CHUNK_SIZE);   // blocks
+        float renderRadius = float(RENDER_DISTANCE * CHUNK_SIZE);
         float fogStart = renderRadius * 0.65f;
         float fogEnd   = renderRadius * 0.95f;
         glUniform3f(camPosLoc, camera.x, camera.y, camera.z);
@@ -925,23 +898,21 @@ private:
         glUniform1f(fogEndLoc, fogEnd);
         glUniform3f(fogColorLoc, 0.53f, 0.81f, 0.92f); // sky blue
 
-        // FIRST PASS: Draw solid (opaque) blocks with depth writes enabled
+        // FIRST PASS - Draw solid blocks
         glDepthMask(GL_TRUE);
         glDisable(GL_CULL_FACE);  // Disable face culling for all blocks
         meshManager.drawVisibleChunksSolid(player.x, player.z);
         
-        // SECOND PASS: Draw water (transparent) blocks with polygon offset
+        // SECOND PASS - Draw transparent blocks
         glEnable(GL_POLYGON_OFFSET_FILL);
-        glPolygonOffset(-1.0f, -1.0f);  // Push water slightly away in depth
-        glDepthMask(GL_FALSE);  // Don't write to depth buffer for transparency
+        glPolygonOffset(-1.0f, -1.0f);
+        glDepthMask(GL_FALSE);
         meshManager.drawVisibleChunksWater(player.x, player.z);
-        glDepthMask(GL_TRUE);  // Re-enable depth writes for future rendering
+        glDepthMask(GL_TRUE);
         glDisable(GL_POLYGON_OFFSET_FILL);
         
-        // Draw outline around targeted block, if any (with depth testing still enabled)
-        if (hasHighlightedBlock) {
-            renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
-        }
+        // Draw outline around targeted block
+        if (hasHighlightedBlock) renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
     }
 
     mat4 perspective(float fov, float aspect, float near, float far) const {
@@ -952,13 +923,11 @@ private:
         proj.data[10] = -(far + near) / (far - near);
         proj.data[11] = -1.0f;
         proj.data[14] = -(2.0f * far * near) / (far - near);
-        // proj.data[1], [2], etc., default to 0 via mat4 constructor
         return proj;
     }
 
     mat4 multiply(const mat4& a, const mat4& b) const {
         mat4 result;
-        // 4x4 matrix multiplication
         for (int row = 0; row < 4; ++row) {
             for (int col = 0; col < 4; ++col) {
                 result.data[col * 4 + row] = 0.0f;
