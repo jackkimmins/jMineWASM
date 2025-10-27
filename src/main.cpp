@@ -17,7 +17,7 @@ constexpr int CHUNK_HEIGHT = 16;
 
 // World is 64x64 chunks (1024x1024 blocks)
 constexpr int WORLD_CHUNK_SIZE_X = 64;
-constexpr int WORLD_CHUNK_SIZE_Y = 6;
+constexpr int WORLD_CHUNK_SIZE_Y = 8;
 constexpr int WORLD_CHUNK_SIZE_Z = 64;
 
 constexpr int WORLD_SIZE_X = CHUNK_SIZE * WORLD_CHUNK_SIZE_X;

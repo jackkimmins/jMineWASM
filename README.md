@@ -1,5 +1,7 @@
 # jMineWASM
 C++ Minecraft-like voxel game compiled to WebAssembly using Emscripten.
+
+- World Size is `1024 x 1024` blocks
  
 
 ## Play Game
@@ -9,9 +11,20 @@ The game is playable via any modern web browser:
 ## To-Do List
 - [x] Procedural World Generation
 - [x] Block Texture Atlas
-- [x] Random Ore Population
+- [x] Random Ore Veins
 - [x] Cave Generation
-- [ ] Water
+- [x] Trees
+- [ ] Lighting Engine (Day/Night Cycle + Block Light Emission)
+- [x] Water Lakes/Rivers/Oceans
+- [ ] Distance Fog
+- [ ] Tall Grass & Flowers
+- [ ] Flowable Liquids
+- [ ] Mobs (Animals + Hostile)
+- [ ] Main Menu
+- [ ] Sound Effects
+- [ ] Mobile/Touch Controls
+- [ ] Desktop Version w/ OpenGL
+- [ ] Multiplayer!!
 
 
 ## Versions
