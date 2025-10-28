@@ -79,12 +79,15 @@ public:
                 vec2 texCoord = TexCoord;
 
                 // ATLAS size for the frag, need to make this dynamic!
-                float tileWidth = 16.0 / 240.0;
+                float tileWidth = 16.0 / 288.0;
                 float tileX = floor(texCoord.x / tileWidth);
 
                 // Classify tiles
-                bool isLeaves = (tileX >= 9.0 && tileX < 10.0);
-                bool isWater  = (tileX >= 10.0 && tileX < 14.0);
+                bool isLeaves    = (tileX >= 9.0  && tileX < 10.0);
+                bool isWater     = (tileX >= 10.0 && tileX < 14.0);
+                bool isTallGrass = (tileX >= 15.0 && tileX < 16.0);
+                bool isFlower    = (tileX >= 16.0 && tileX < 18.0);
+                bool isCutout    = isLeaves || isTallGrass || isFlower;
 
                 // Animate water by shifting within its 4-frame strip
                 if (isWater) {
@@ -95,7 +98,8 @@ public:
 
                 vec4 texColor = texture(uTexture, texCoord);
 
-                if (isLeaves) {
+                // Alpha-test cutout for foliage (leaves, tall grass etc.)
+                if (isCutout) {
                     if (texColor.a < 0.5) discard;
                     texColor.a = 1.0;
                 }
@@ -204,39 +208,31 @@ public:
             player.y = spawnPos.y;
             player.z = spawnPos.z;
         } else {
-            // Fallback
             int h = world.getHeightAt(static_cast<int>(SPAWN_X), static_cast<int>(SPAWN_Z));
             player.x = std::floor(SPAWN_X) + 0.5f;
             player.y = h + 1.6f;
             player.z = std::floor(SPAWN_Z) + 0.5f;
         }
 
-        // Initialise last safe position at spawn
         lastSafePos = { player.x, player.y, player.z };
 
-        // Update camera position to match spawn
         camera.x = player.x;
         camera.y = player.y + 1.6f;
         camera.z = player.z;
         
-        // Track player chunk position
         lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
         lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
 
-        // Get initial canvas size
         int canvasWidth, canvasHeight;
         emscripten_get_canvas_element_size("canvas", &canvasWidth, &canvasHeight);
 
-        // Projection matrix with dyn aspect ratio
         projection = perspective(CAM_FOV * M_PI / 180.0f, static_cast<float>(canvasWidth) / static_cast<float>(canvasHeight), 0.1f, 1000.0f);
 
-        // Enable depth testing and face culling
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
         
-        // Enable blending for transparency
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -244,11 +240,9 @@ public:
     }
 
     void mainLoop() {
-        // Calculate time since last frame
         deltaTime = calculateDeltaTime();
         gameTime += deltaTime;
 
-        // Handle player movement input (updates player.x and player.z)
         processInput(deltaTime);
 
         updateChunks();
@@ -256,7 +250,6 @@ public:
 
         if (isMoving) bobbingTime += deltaTime;
 
-        // Highlight outline
         updateHighlightedBlock();
 
         meshManager.updateDirtyChunks(world);
@@ -302,7 +295,6 @@ public:
             if (!pressed && isSprinting) isSprinting = false;
         }
 
-        // Exiting sprint if moving backward
         if (keyCode == 83 && pressed) isSprinting = false;
     }
 
@@ -317,7 +309,7 @@ public:
         RaycastHit hit = raycast(maxDistance);
         if (!hit.hit) return;
         if (button == 0) {
-            // Left-click: remove block
+            // Left-click: remove block (works for solids and tall grass)
             removeBlock(hit.blockPosition.x, hit.blockPosition.y, hit.blockPosition.z);
         } else if (button == 2) {
             // Right-click: place block
@@ -326,25 +318,19 @@ public:
     }
 
     void updateChunks() {
-        // Check if player entered a new chunk
         int currentChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
         int currentChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
 
         if (currentChunkX != lastPlayerChunkX || currentChunkZ != lastPlayerChunkZ) {
-            // Load chunks around the new position
             world.loadChunksAroundPosition(player.x, player.z);
-
-            // Unload chunks far away to free memory
             world.unloadDistantChunks(player.x, player.z);
 
-            // Generate meshes for any newly loaded chunks
             for (const auto& coord : world.getLoadedChunks()) {
                 if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
                     meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
                 }
             }
 
-            // Update the last known chunk coordinates
             lastPlayerChunkX = currentChunkX;
             lastPlayerChunkZ = currentChunkZ;
         }
@@ -383,9 +369,18 @@ private:
         return delta;
     }
 
+    // Solid for physics (does NOT include tall grass)
     bool isBlockSolid(int x, int y, int z) const {
         const Block* b = world.getBlockAt(x, y, z);
         return b ? b->isSolid : true;
+    }
+
+    // Selectable for raycast (includes tall grass even though non-solid)
+    bool isBlockSelectable(int x, int y, int z) const {
+        const Block* b = world.getBlockAt(x, y, z);
+        if (!b) return false;
+        if (b->isSolid) return true;
+        return (b->type == BLOCK_TALL_GRASS || b->type == BLOCK_ORANGE_FLOWER || b->type == BLOCK_BLUE_FLOWER);
     }
 
     bool isWaterBlock(int x, int y, int z) const {
@@ -394,48 +389,38 @@ private:
     }
 
     bool findSafeSpawn(float startX, float startZ, Vector3& outPos) {
-        // Convert to integer column
         int sx = static_cast<int>(std::floor(startX));
         int sz = static_cast<int>(std::floor(startZ));
         const int maxRadiusBlocks = (CHUNK_LOAD_DISTANCE - 1) * CHUNK_SIZE - 2;
         const int maxRadius = std::max(8, maxRadiusBlocks);
 
         auto tryColumn = [&](int cx, int cz, Vector3& pos) -> bool {
-            // Ensure chunks around this candidate are available for queries
             world.loadChunksAroundPosition(cx + 0.5f, cz + 0.5f);
 
             int h = world.getHeightAt(cx, cz);
-            // Reject ocean/lake positions
             if (h < WATER_LEVEL) return false;
 
-            // Ground must be solid and not water
             if (!isBlockSolid(cx, h, cz)) return false;
             if (isWaterBlock(cx, h + 1, cz)) return false;
 
-            // Candidate feet position (center of block for safety)
             float px = cx + 0.5f;
             float pz = cz + 0.5f;
             float py = static_cast<float>(h) + 1.6f;
 
-            // Ensure the player is not intersecting anything
             if (isColliding(px, py, pz)) return false;
 
             pos = { px, py, pz };
             return true;
         };
 
-        // Check the center first
         if (tryColumn(sx, sz, outPos)) return true;
 
-        // Spiral search outward
         for (int r = 1; r <= maxRadius; ++r) {
-            // top and bottom rows of the square ring
             for (int x = sx - r; x <= sx + r; ++x) {
                 Vector3 pos;
                 if (tryColumn(x, sz - r, pos)) { outPos = pos; return true; }
                 if (tryColumn(x, sz + r, pos)) { outPos = pos; return true; }
             }
-            // left and right columns of the square ring
             for (int z = sz - r + 1; z <= sz + r - 1; ++z) {
                 Vector3 pos;
                 if (tryColumn(sx - r, z, pos)) { outPos = pos; return true; }
@@ -451,7 +436,6 @@ private:
     }
 
     bool isColliding(float x, float y, float z) const {
-        // Axis-Aligned Bounding Box (AABB) collision check for player
         float halfWidth = 0.3f;
         float halfDepth = 0.3f;
         float epsilon = 0.005f;
@@ -465,6 +449,7 @@ private:
         for (int bx = std::floor(minX); bx <= std::floor(maxX); ++bx) {
             for (int by = std::floor(minY); by <= std::floor(maxY); ++by) {
                 for (int bz = std::floor(minZ); bz <= std::floor(maxZ); ++bz) {
+                    // Tall grass is non-solid so isBlockSolid() returns false for it.
                     if (isBlockSolid(bx, by, bz)) {
                         return true;
                     }
@@ -487,12 +472,9 @@ private:
                 player.y = newY;
                 player.onGround = false;
             } else {
-                // Collisions while flying
                 if (vert > 0.0f) {
-                    // Moving up into a ceiling
                     player.y = std::floor(newY + PLAYER_HEIGHT) - PLAYER_HEIGHT;
                 } else if (vert < 0.0f) {
-                    // landing stops flying
                     player.y = std::floor(newY) + 1.0f;
                     player.onGround = true;
                     isFlying = false;
@@ -500,7 +482,6 @@ private:
                 }
             }
 
-            // Check for landing if user wasn't holding down
             checkGround();
             if (player.onGround) isFlying = false;
 
@@ -518,11 +499,9 @@ private:
             return;
         }
 
-        // Normal physics with gravity
         player.velocityY += GRAVITY * dt;
         float newY = player.y + player.velocityY * dt;
 
-        // If player falls below world, reset position
         if (player.y < -1.0f) {
             Vector3 spawnPos;
             if (!findSafeSpawn(SPAWN_X, SPAWN_Z, spawnPos)) {
@@ -540,7 +519,6 @@ private:
             camera.y = player.y + 1.6f;
             camera.z = player.z;
 
-            // Reload chunks around the spawn to ensure safe landing area
             lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
             lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
             world.loadChunksAroundPosition(player.x, player.z);
@@ -552,37 +530,30 @@ private:
                     meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
                 }
             }
-            // Reset last safe position too
             lastSafePos = { player.x, player.y, player.z };
             return;
         }
 
         if (player.velocityY > 0) {
-            // Moving upward
             if (!isColliding(player.x, newY, player.z)) {
                 player.y = newY;
             } else {
-                // Snap so the player's head rests just below the ceiling
                 player.y = std::floor(newY + PLAYER_HEIGHT) - PLAYER_HEIGHT;
                 player.velocityY = 0.0f;
             }
         } else {
-            // Moving downward or standing
             if (!isColliding(player.x, newY, player.z)) {
                 player.y = newY;
                 player.onGround = false;
             } else {
-                // Landed on a block below
-                player.y = std::floor(newY) + 1.0f;  // snap to top of the block
+                player.y = std::floor(newY) + 1.0f;
                 player.velocityY = 0.0f;
                 player.onGround = true;
             }
         }
 
-        // Continuously check if player is standing on ground after physics update
         checkGround();
 
-        // Fail-safe: if we are intersecting (e.g., chunk popped in), revert to last known good position
         if (isColliding(player.x, player.y, player.z)) {
             player.x = lastSafePos.x;
             player.y = lastSafePos.y;
@@ -590,16 +561,13 @@ private:
             player.velocityY = 0.0f;
             player.onGround = true;
         } else {
-            // Update last safe position when clean
             lastSafePos = { player.x, player.y, player.z };
         }
     }
 
     void processInput(float dt) {
-        // Track time for double-tap logic
         currentTime += dt;
 
-        // Determine movement speed (consider sprint or fly)
         float baseSpeed = isSprinting ? SPRINT_SPEED : PLAYER_SPEED;
         if (isFlying) {
             baseSpeed = FLY_SPEED;
@@ -607,40 +575,35 @@ private:
         }
         float distance = baseSpeed * dt;
 
-        // Calculate forward and right movement vectors based on camera yaw
         float radYaw = camera.yaw * M_PI / 180.0f;
         float frontX = cosf(radYaw);
         float frontZ = sinf(radYaw);
         float rightX = -sinf(radYaw);
         float rightZ = cosf(radYaw);
 
-        // Movement deltas
         float deltaX = 0.0f;
         float deltaZ = 0.0f;
 
-        if (keys[87]) { // W - forward
+        if (keys[87]) { // W
             deltaX += frontX * distance;
             deltaZ += frontZ * distance;
         }
-        if (keys[83]) { // S - backward
+        if (keys[83]) { // S
             deltaX -= frontX * distance;
             deltaZ -= frontZ * distance;
-            // Exiting sprint if moving backward
             isSprinting = false;
         }
-        if (keys[65]) { // A - strafe left
+        if (keys[65]) { // A
             deltaX -= rightX * distance;
             deltaZ -= rightZ * distance;
         }
-        if (keys[68]) { // D - strafe right
+        if (keys[68]) { // D
             deltaX += rightX * distance;
             deltaZ += rightZ * distance;
         }
 
-        // Determine if the player is trying to move (for bobbing effect)
-        isMoving = (deltaX != 0.0f || deltaZ != 0.0f) && !isFlying; // no bobbing in fly
+        isMoving = (deltaX != 0.0f || deltaZ != 0.0f) && !isFlying;
 
-        // Preload chunks for the intended destination
         if (deltaX != 0.0f || deltaZ != 0.0f) {
             world.loadChunksAroundPosition(player.x + deltaX, player.z + deltaZ);
             world.unloadDistantChunks(player.x + deltaX, player.z + deltaZ);
@@ -651,19 +614,15 @@ private:
             }
         }
 
-        // Attempt horizontal movement with collision checks
         if (!isColliding(player.x + deltaX, player.y, player.z)) player.x += deltaX;
         if (!isColliding(player.x, player.y, player.z + deltaZ)) player.z += deltaZ;
 
-        // If the player stopped pressing forward, stop sprinting
         if (!keys[87] && isSprinting) isSprinting = false;
 
-        // If flying and we happen to be on ground, stop flying
         if (isFlying) {
             checkGround();
             if (player.onGround) isFlying = false;
         } else {
-            // After moving, verify if still on ground
             checkGround();
         }
     }
@@ -671,16 +630,33 @@ private:
     void removeBlock(int x, int y, int z) {
         Block* block = world.getBlockAt(x, y, z);
         if (!block) return;
-
-        // Bedrock cannot be removed
         if (block->type == BLOCK_BEDROCK) return;
 
+        auto isPlant = [](BlockType t) {
+            return t == BLOCK_TALL_GRASS || t == BLOCK_ORANGE_FLOWER || t == BLOCK_BLUE_FLOWER;
+        };
+
+        // If you directly broke a plant, just clear it
+        if (isPlant(block->type)) {
+            block->isSolid = false;
+            block->type = BLOCK_DIRT;
+            int cx = x / CHUNK_SIZE, cy = y / CHUNK_HEIGHT, cz = z / CHUNK_SIZE;
+            world.markChunkDirty(cx, cy, cz);
+            return;
+        }
+
+        // Break the supporting block
         block->isSolid = false;
-        // Mark the chunk containing this block as dirty to update its mesh
-        int cx = x / CHUNK_SIZE;
-        int cy = y / CHUNK_HEIGHT;
-        int cz = z / CHUNK_SIZE;
+        int cx = x / CHUNK_SIZE, cy = y / CHUNK_HEIGHT, cz = z / CHUNK_SIZE;
         world.markChunkDirty(cx, cy, cz);
+
+        Block* above = world.getBlockAt(x, y + 1, z);
+        if (above && isPlant(above->type)) {
+            above->isSolid = false;
+            above->type = BLOCK_DIRT;
+            int acx = x / CHUNK_SIZE, acy = (y + 1) / CHUNK_HEIGHT, acz = z / CHUNK_SIZE;
+            world.markChunkDirty(acx, acy, acz);
+        }
     }
 
     void placeBlock(int x, int y, int z) {
@@ -688,7 +664,6 @@ private:
         if (!block) return;
         if (block->isSolid) return;
 
-        // Prevent placing blocks inside the player's own bounding box
         float halfWidth = 0.3f;
         float halfDepth = 0.3f;
         float playerMinX = player.x - halfWidth;
@@ -708,11 +683,9 @@ private:
                                (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
         if (overlapsPlayer) return;
 
-        // Place new block
         block->isSolid = true;
         block->type = BLOCK_PLANKS;
 
-        // Mark the chunk as dirty to refresh mesh
         int cx = x / CHUNK_SIZE;
         int cy = y / CHUNK_HEIGHT;
         int cz = z / CHUNK_SIZE;
@@ -731,7 +704,6 @@ private:
         Vector3 origin = { camera.x, camera.y, camera.z };
         Vector3 direction = camera.getFrontVector();
 
-        // Normalise direction vector
         float len = std::sqrt(direction.x*direction.x + direction.y*direction.y + direction.z*direction.z);
         if (len != 0) {
             direction.x /= len;
@@ -739,18 +711,15 @@ private:
             direction.z /= len;
         }
 
-        // Starting block coordinates
         int bx = static_cast<int>(std::floor(origin.x));
         int by = static_cast<int>(std::floor(origin.y));
         int bz = static_cast<int>(std::floor(origin.z));
         int prevX = bx, prevY = by, prevZ = bz;
 
-        // Determine step direction for the ray
         int stepX = (direction.x >= 0 ? 1 : -1);
         int stepY = (direction.y >= 0 ? 1 : -1);
         int stepZ = (direction.z >= 0 ? 1 : -1);
 
-        // Calculate initial tMax and tDelta for ray-grid intersection
         float tMaxX = intbound(origin.x, direction.x);
         float tMaxY = intbound(origin.y, direction.y);
         float tMaxZ = intbound(origin.z, direction.z);
@@ -759,20 +728,16 @@ private:
         float tDeltaZ = (direction.z != 0 ? stepZ / direction.z : INFINITY);
         float traveled = 0.0f;
 
-        // Traverse the grid
         while (traveled <= maxDistance) {
-            if (isBlockSolid(bx, by, bz)) {
-                // Hit a solid block
+            // Selectable includes solids and tall grass (non-solid)
+            if (isBlockSelectable(bx, by, bz)) {
                 result.hit = true;
                 result.blockPosition = { bx, by, bz };
                 result.adjacentPosition = { prevX, prevY, prevZ };
                 return result;
             }
 
-            // Move to next grid cell
-            prevX = bx;
-            prevY = by;
-            prevZ = bz;
+            prevX = bx; prevY = by; prevZ = bz;
             if (tMaxX < tMaxY) {
                 if (tMaxX < tMaxZ) {
                     bx += stepX;
@@ -826,22 +791,20 @@ private:
         float minZ = z - offset, maxZ = z + 1.0f + offset;
         std::vector<float> edges;
 
-        // Construct outline edges based on visible faces
-        if (bottomFace || frontFace)    edges.insert(edges.end(), { minX, minY, minZ,  maxX, minY, minZ }); // front-bottom edge
-        if (bottomFace || rightFace)    edges.insert(edges.end(), { maxX, minY, minZ,  maxX, minY, maxZ }); // right-bottom edge
-        if (bottomFace || backFace)     edges.insert(edges.end(), { maxX, minY, maxZ,  minX, minY, maxZ }); // back-bottom edge
-        if (bottomFace || leftFace)     edges.insert(edges.end(), { minX, minY, maxZ,  minX, minY, minZ }); // left-bottom edge
-        if (topFace || frontFace)       edges.insert(edges.end(), { minX, maxY, minZ,  maxX, maxY, minZ }); // front-top edge
-        if (topFace || rightFace)       edges.insert(edges.end(), { maxX, maxY, minZ,  maxX, maxY, maxZ }); // right-top edge
-        if (topFace || backFace)        edges.insert(edges.end(), { maxX, maxY, maxZ,  minX, maxY, maxZ }); // back-top edge
-        if (topFace || leftFace)        edges.insert(edges.end(), { minX, maxY, maxZ,  minX, maxY, minZ }); // left-top edge
-        if (frontFace || leftFace)      edges.insert(edges.end(), { minX, minY, minZ,  minX, maxY, minZ }); // front-left vertical
-        if (frontFace || rightFace)     edges.insert(edges.end(), { maxX, minY, minZ,  maxX, maxY, minZ }); // front-right vertical
-        if (backFace || rightFace)      edges.insert(edges.end(), { maxX, minY, maxZ,  maxX, maxY, maxZ }); // back-right vertical
-        if (backFace || leftFace)       edges.insert(edges.end(), { minX, minY, maxZ,  minX, maxY, maxZ }); // back-left vertical
+        if (bottomFace || frontFace)    edges.insert(edges.end(), { minX, minY, minZ,  maxX, minY, minZ });
+        if (bottomFace || rightFace)    edges.insert(edges.end(), { maxX, minY, minZ,  maxX, minY, maxZ });
+        if (bottomFace || backFace)     edges.insert(edges.end(), { maxX, minY, maxZ,  minX, minY, maxZ });
+        if (bottomFace || leftFace)     edges.insert(edges.end(), { minX, minY, maxZ,  minX, minY, minZ });
+        if (topFace || frontFace)       edges.insert(edges.end(), { minX, maxY, minZ,  maxX, maxY, minZ });
+        if (topFace || rightFace)       edges.insert(edges.end(), { maxX, maxY, minZ,  maxX, maxY, maxZ });
+        if (topFace || backFace)        edges.insert(edges.end(), { maxX, maxY, maxZ,  minX, maxY, maxZ });
+        if (topFace || leftFace)        edges.insert(edges.end(), { minX, maxY, maxZ,  minX, maxY, minZ });
+        if (frontFace || leftFace)      edges.insert(edges.end(), { minX, minY, minZ,  minX, maxY, minZ });
+        if (frontFace || rightFace)     edges.insert(edges.end(), { maxX, minY, minZ,  maxX, maxY, minZ });
+        if (backFace || rightFace)      edges.insert(edges.end(), { maxX, minY, maxZ,  maxX, maxY, maxZ });
+        if (backFace || leftFace)       edges.insert(edges.end(), { minX, minY, maxZ,  minX, maxY, maxZ });
         if (edges.empty()) return;
 
-        // Render outline using outline shader
         outlineShader->use();
         glUniformMatrix4fv(outlineMvpLoc, 1, GL_FALSE, mvp.data);
         glBindVertexArray(outlineVAO);
@@ -855,12 +818,10 @@ private:
     }
 
     void render() {
-        // Sync camera position with player
         camera.x = player.x;
         camera.y = player.y + 1.6f;
         camera.z = player.z;
 
-        // Smoothly apply head bobbing effect to cam position
         float targetBob = 0.0f;
         float targetBobHorizontal = 0.0f;
         if (isMoving) {
@@ -880,7 +841,6 @@ private:
         glViewport(0, 0, width, height);
         projection = perspective(CAM_FOV * M_PI / 180.0f, (float)width / (float)height, 0.1f, 1000.0f);
 
-        // Clear screen with sky color (same as fog color)
         glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -896,14 +856,14 @@ private:
         glUniform3f(camPosLoc, camera.x, camera.y, camera.z);
         glUniform1f(fogStartLoc, fogStart);
         glUniform1f(fogEndLoc, fogEnd);
-        glUniform3f(fogColorLoc, 0.53f, 0.81f, 0.92f); // sky blue
+        glUniform3f(fogColorLoc, 0.53f, 0.81f, 0.92f);
 
-        // FIRST PASS - Draw solid blocks
+        // FIRST PASS - Draw opaque & alpha-tested (solids + tall grass)
         glDepthMask(GL_TRUE);
-        glDisable(GL_CULL_FACE);  // Disable face culling for all blocks
+        glDisable(GL_CULL_FACE);  // disable culling so billboard plants are double-sided
         meshManager.drawVisibleChunksSolid(player.x, player.z);
         
-        // SECOND PASS - Draw transparent blocks
+        // SECOND PASS - Draw transparent (water)
         glEnable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(-1.0f, -1.0f);
         glDepthMask(GL_FALSE);
@@ -911,7 +871,6 @@ private:
         glDepthMask(GL_TRUE);
         glDisable(GL_POLYGON_OFFSET_FILL);
         
-        // Draw outline around targeted block
         if (hasHighlightedBlock) renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
     }
 

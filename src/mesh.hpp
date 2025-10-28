@@ -111,11 +111,18 @@ public:
             for (int y = 0; y < CHUNK_HEIGHT; ++y) {
                 for (int z = 0; z < CHUNK_SIZE; ++z) {
                     const Block& block = chunk->blocks[x][y][z];
-                    if (!block.isSolid) continue;
-                    
+
                     float worldX = (cx * CHUNK_SIZE) + x;
                     float worldY = (cy * CHUNK_HEIGHT) + y;
                     float worldZ = (cz * CHUNK_SIZE) + z;
+
+                    // Plants like tall grass are non-solid and rendered as crossed quads.
+                    if (block.type == BLOCK_TALL_GRASS || block.type == BLOCK_ORANGE_FLOWER || block.type == BLOCK_BLUE_FLOWER) {
+                        addBillboardPlant(*mesh, worldX, worldY, worldZ, solidIndex, block.type);
+                        continue;
+                    }
+
+                    if (!block.isSolid) continue;
                     
                     bool isWater = (block.type == BLOCK_WATER);
                     bool isFoliage = (block.type == BLOCK_LEAVES);
@@ -318,10 +325,68 @@ private:
             case BLOCK_LEAVES:   return 9;
             case BLOCK_WATER:    return 10;
             case BLOCK_SAND:     return 14;
+            case BLOCK_TALL_GRASS:return 15;
+            case BLOCK_ORANGE_FLOWER: return 16;
+            case BLOCK_BLUE_FLOWER: return 17;
             default:             return 0;
         }
     }
-    
+
+    // Cross-billboard (two vertical quads) for plants like tall grass, rotated to block diagonals.
+    void addBillboardPlant(ChunkMesh& mesh, float x, float y, float z, unsigned int& indexOffset, BlockType blockType) {
+        int textureIndex = getTextureIndex(blockType, FACE_FRONT);
+        int tileX = textureIndex % ATLAS_TILES_WIDTH;
+        int tileY = textureIndex / ATLAS_TILES_WIDTH;
+
+        float u0 = (tileX * ATLAS_TILE_SIZE) / float(ATLAS_TILES_WIDTH);
+        float v0 = (tileY * ATLAS_TILE_SIZE) / float(ATLAS_TILES_HEIGHT);
+        float u1 = ((tileX + 1) * ATLAS_TILE_SIZE) / float(ATLAS_TILES_WIDTH);
+        float v1 = ((tileY + 1) * ATLAS_TILE_SIZE) / float(ATLAS_TILES_HEIGHT);
+        float uv[4][2] = { {u0,v1}, {u1,v1}, {u1,v0}, {u0,v0} };
+
+        std::vector<float>& vertices = mesh.solidVertices;
+        std::vector<unsigned int>& indices = mesh.solidIndices;
+
+        const float y0 = y;
+        const float y1 = y + 1.0f;
+        const float eps = 0.0008f;
+
+        float quadA[4][3] = {
+            { x + 0.0f + eps, y0, z + 0.0f + eps },   // bottom-left
+            { x + 1.0f - eps, y0, z + 1.0f - eps },   // bottom-right
+            { x + 1.0f - eps, y1, z + 1.0f - eps },   // top-right
+            { x + 0.0f + eps, y1, z + 0.0f + eps }    // top-left
+        };
+
+        float quadB[4][3] = {
+            { x + 1.0f - eps, y0, z + 0.0f + eps },   // bottom-left
+            { x + 0.0f + eps, y0, z + 1.0f - eps },   // bottom-right
+            { x + 0.0f + eps, y1, z + 1.0f - eps },   // top-right
+            { x + 1.0f - eps, y1, z + 0.0f + eps }    // top-left
+        };
+
+        auto pushQuad = [&](float q[4][3]) {
+            for (int i = 0; i < 4; ++i) {
+                vertices.push_back(q[i][0]);
+                vertices.push_back(q[i][1]);
+                vertices.push_back(q[i][2]);
+                vertices.push_back(uv[i][0]);
+                vertices.push_back(uv[i][1]);
+                vertices.push_back(0.0f);
+            }
+            indices.push_back(indexOffset + 0);
+            indices.push_back(indexOffset + 1);
+            indices.push_back(indexOffset + 2);
+            indices.push_back(indexOffset + 2);
+            indices.push_back(indexOffset + 3);
+            indices.push_back(indexOffset + 0);
+            indexOffset += 4;
+        };
+
+        pushQuad(quadA);
+        pushQuad(quadB);
+    }
+
     void addFace(ChunkMesh& mesh, float x, float y, float z, unsigned int& indexOffset, 
                  FaceDirection face, BlockType blockType, const World& world, bool isWater, bool isFoliage) {
         int faceIndex = static_cast<int>(face);

@@ -16,7 +16,7 @@ The game is playable via any modern web browser:
 - [x] Trees
 - [ ] Lighting Engine (Day/Night Cycle + Block Light Emission)
 - [x] Water Lakes/Rivers/Oceans
-- [ ] Distance Fog
+- [x] Distance Fog
 - [ ] Tall Grass & Flowers
 - [ ] Flowable Liquids
 - [ ] Mobs (Animals + Hostile)
@@ -29,9 +29,17 @@ The game is playable via any modern web browser:
 
 ## Versions
 
-### V1.0 - The Generation
-Playable via: [https://3a6e6c0b.jmine.pages.dev/](https://3a6e6c0b.jmine.pages.dev/)
+### V1.2 - Realism Update
+Water, trees, fog, flying, and much better world generation.
+Playable via: [https://35beb8db.jmine.pages.dev/](https://35beb8db.jmine.pages.dev/)
 
+### V1.1 - The Expansion
+Much larger world size of 1024x1024 blocks.
+Playable via: [https://09dd440a.jmine.pages.dev/](https://09dd440a.jmine.pages.dev/)
+
+### V1.0 - The Generation
+Procedural world generation, chunking, block types, and basic mining/building.
+Playable via: [https://3a6e6c0b.jmine.pages.dev/](https://3a6e6c0b.jmine.pages.dev/)
 
 ### V0.0 - Beta/Concept
 Available via old repo: [jackkimmins/3D-Cube-Game: Browser-based 3D block Game - C++ and WebAssembly w/ SDL2](https://github.com/jackkimmins/3D-Cube-Game)

@@ -72,7 +72,7 @@ constexpr float IRON_ORE_CHANCE = 0.015f;
 
 // Texture Atlas and Ambient Occlusion
 constexpr int ATLAS_TILE_SIZE = 16;
-constexpr int ATLAS_TILES_WIDTH = 240;
+constexpr int ATLAS_TILES_WIDTH = 288;
 constexpr int ATLAS_TILES_HEIGHT = 16;
 constexpr float AO_STRENGTH = 0.5f;
 

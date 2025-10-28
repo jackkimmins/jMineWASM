@@ -21,7 +21,10 @@ enum BlockType {
     BLOCK_LOG,
     BLOCK_LEAVES,
     BLOCK_WATER,
-    BLOCK_SAND
+    BLOCK_SAND,
+    BLOCK_TALL_GRASS,
+    BLOCK_ORANGE_FLOWER,
+    BLOCK_BLUE_FLOWER
 };
 
 enum FaceDirection {
@@ -71,7 +74,6 @@ private:
     std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>> chunks;
     std::unordered_set<ChunkCoord, std::hash<ChunkCoord>> loadedChunks;
 
-    // Tree Generation Helpers
     inline void setBlockAndMarkDirty(int x, int y, int z, BlockType t, bool solid = true) {
         if (x < 0 || x >= WORLD_SIZE_X || y < 0 || y >= WORLD_SIZE_Y || z < 0 || z >= WORLD_SIZE_Z) return;
         int cx = x / CHUNK_SIZE;
@@ -101,7 +103,7 @@ private:
         return -1;
     }
 
-    // Simple tree canopy placement around (x, yTop, z)
+    // Tree generation
     void placeOakCanopy(int x, int yTop, int z, std::mt19937& rng) {
         std::uniform_real_distribution<float> r01(0.0f, 1.0f);
         for (int dy = -2; dy <= 2; ++dy) {
@@ -129,37 +131,26 @@ private:
         if (yTop + 3 < WORLD_SIZE_Y && isAirAt(x, yTop + 3, z)) setBlockAndMarkDirty(x, yTop + 3, z, BLOCK_LEAVES, true);
     }
 
-    // Attempt to place oak tree
     bool tryPlaceOakTreeAt(int x, int groundY, int z, std::mt19937& rng) {
-        // Ground must be grass, air above, no water
         Block* ground = getBlockAt(x, groundY, z);
         if (!ground || !ground->isSolid || ground->type != BLOCK_GRASS) return false;
         if (!isAirAt(x, groundY + 1, z)) return false;
         std::uniform_int_distribution<int> trunkDist(4, 6);
         int trunkH = trunkDist(rng);
-        if (groundY + trunkH + 3 >= WORLD_SIZE_Y) return false; // ensure canopy fits
+        if (groundY + trunkH + 3 >= WORLD_SIZE_Y) return false;
 
-        // Ensure trunk column is clear
         for (int i = 1; i <= trunkH; ++i) {
             const Block* b = getBlockAt(x, groundY + i, z);
             if (b && b->isSolid && b->type != BLOCK_LEAVES) return false;
         }
+        for (int i = 1; i <= trunkH; ++i) setBlockAndMarkDirty(x, groundY + i, z, BLOCK_LOG, true);
 
-        // Place trunk
-        for (int i = 1; i <= trunkH; ++i) {
-            setBlockAndMarkDirty(x, groundY + i, z, BLOCK_LOG, true);
-        }
-
-        // Place canopy centered at trunk top
         int canopyY = groundY + trunkH;
         placeOakCanopy(x, canopyY, z, rng);
-
         return true;
     }
 
-    // Generate trees once per (cx, cz) column
     void generateTreesForColumn(int cx, int cz) {
-        // Deterministic RNG per column
         unsigned int seed = static_cast<unsigned int>(PERLIN_SEED) ^ (cx * 0x9E3779B9u) ^ (cz * 0x85EBCA6Bu);
         std::mt19937 rng(seed);
         std::uniform_real_distribution<float> r01(0.0f, 1.0f);
@@ -172,20 +163,16 @@ private:
                 int wx = baseX + lx;
                 int wz = baseZ + lz;
 
-                // Light density noise to vary tree density
                 double densityNoise = perlin.noise(wx * 0.01, 0.0, wz * 0.01) * 0.5 + 0.5; // [0,1]
                 float spawnChance = 0.015f + static_cast<float>(0.02 * densityNoise);
                 if (r01(rng) >= spawnChance) continue;
 
-                // Find actual surface after caves/surface updates
                 int y = findSurfaceY(wx, wz);
                 if (y < 0) continue;
 
-                // Must be grass
                 Block* g = getBlockAt(wx, y, wz);
                 if (!g || g->type != BLOCK_GRASS) continue;
 
-                // Avoid shorelines
                 bool nearWater = false;
                 for (int dx = -1; dx <= 1 && !nearWater; ++dx) {
                     for (int dz = -1; dz <= 1 && !nearWater; ++dz) {
@@ -195,13 +182,125 @@ private:
                 }
                 if (nearWater) continue;
 
-                // Place tree
                 tryPlaceOakTreeAt(wx, y, wz, rng);
             }
         }
     }
 
-    // Find the topmost seabed block
+    // Grass + Flowers generation (abundant grass, small same-type flower clusters)
+    void generateFoliageForColumn(int cx, int cz) {
+        // Deterministic RNG per (cx,cz)
+        unsigned int seed = static_cast<unsigned int>(PERLIN_SEED) ^ (cx * 0xB5297A4Du) ^ (cz * 0x68E31DA4u) ^ 0x9E3779B9u;
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<float> r01(0.0f, 1.0f);
+        std::uniform_int_distribution<int> jitter(-2, 2);
+
+        const int baseX = cx * CHUNK_SIZE;
+        const int baseZ = cz * CHUNK_SIZE;
+
+        auto placePlantIfValid = [&](int px, int pz, BlockType t) {
+            if (px < 0 || px >= WORLD_SIZE_X || pz < 0 || pz >= WORLD_SIZE_Z) return false;
+            int y = findSurfaceY(px, pz);
+            if (y < 0) return false;
+
+            // Must sit on grass and empty above
+            Block* ground = getBlockAt(px, y, pz);
+            if (!ground || ground->type != BLOCK_GRASS) return false;
+
+            Block* above = getBlockAt(px, y + 1, pz);
+            if (above && above->isSolid) return false;
+
+            Block* above2 = getBlockAt(px, y + 2, pz);
+            if (above2 && above2->isSolid && above2->type == BLOCK_WATER) return false;
+
+            setBlockAndMarkDirty(px, y + 1, pz, t, /*solid=*/false);
+            return true;
+        };
+
+        // GRASS PATCHES
+        {
+            // Coarse seeds to form clumps
+            const int STEP = 4;
+            for (int lx = 0; lx < CHUNK_SIZE; lx += STEP) {
+                for (int lz = 0; lz < CHUNK_SIZE; lz += STEP) {
+                    int wx = baseX + lx;
+                    int wz = baseZ + lz;
+
+                    // Clumpy mask for grass
+                    double n = perlin.noise(wx * 0.06, 321.0, wz * 0.06) * 0.5 + 0.5; // [0,1]
+                    if (n < 0.50) continue;
+                    if (r01(rng) > 0.65f) continue;
+
+                    int blades = 8 + (int)std::round(r01(rng) * 12.0f);
+                    for (int i = 0; i < blades; ++i) {
+                        int px = wx + jitter(rng);
+                        int pz = wz + jitter(rng);
+                        placePlantIfValid(px, pz, BLOCK_TALL_GRASS);
+                    }
+                }
+            }
+
+            // Sparse singles to break up gaps
+            for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+                for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+                    if (r01(rng) > 0.04f) continue;
+                    int wx = baseX + lx;
+                    int wz = baseZ + lz;
+                    placePlantIfValid(wx, wz, BLOCK_TALL_GRASS);
+                }
+            }
+        }
+
+        // FLOWER CLUSTERS
+        {
+            // Cluster seeds more spaced out than grass
+            const int STEP = 8;
+            std::uniform_int_distribution<int> clusterRadiusDist(2, 3);
+            std::uniform_int_distribution<int> clusterCountDist(3, 7);
+            std::uniform_int_distribution<int> jitterSmall(-1, 1);
+
+            for (int lx = 0; lx < CHUNK_SIZE; lx += STEP) {
+                for (int lz = 0; lz < CHUNK_SIZE; lz += STEP) {
+                    int wx = baseX + lx;
+                    int wz = baseZ + lz;
+
+                    double n = perlin.noise(wx * 0.03, 777.0, wz * 0.03) * 0.5 + 0.5; // [0,1]
+                    if (!(n > 0.62 && r01(rng) < 0.35f)) continue;
+
+                    // Choose flower type for this cluster (same type within cluster)
+                    BlockType flowerType = (r01(rng) < 0.5f) ? BLOCK_ORANGE_FLOWER : BLOCK_BLUE_FLOWER;
+
+                    int clusterCount  = clusterCountDist(rng);
+                    int clusterRadius = clusterRadiusDist(rng);
+
+                    for (int i = 0; i < clusterCount; ++i) {
+                        int ox = wx + jitterSmall(rng);
+                        int oz = wz + jitterSmall(rng);
+                        float ang = r01(rng) * 6.2831853f;
+                        float r   = (float)clusterRadius * std::sqrt(r01(rng));
+                        int px = ox + (int)std::round(std::cos(ang) * r);
+                        int pz = oz + (int)std::round(std::sin(ang) * r);
+
+                        placePlantIfValid(px, pz, flowerType);
+                    }
+                }
+            }
+
+            // Very sparse single flowers
+            for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+                for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+                    if (r01(rng) > 0.0075f) continue;
+                    int wx = baseX + lx;
+                    int wz = baseZ + lz;
+                    BlockType flowerType = (r01(rng) < 0.5f) ? BLOCK_ORANGE_FLOWER : BLOCK_BLUE_FLOWER;
+                    placePlantIfValid(wx, wz, flowerType);
+                }
+            }
+        }
+    }
+
+
+    // Sand patch generation
     int findUnderwaterFloorY(int wx, int wyMinInclusive, int wyMaxInclusive, int wz) const {
         int top = std::min(wyMaxInclusive, WATER_LEVEL - 1);
         for (int y = top; y >= wyMinInclusive; --y) {
@@ -216,7 +315,6 @@ private:
         return -1;
     }
 
-    // Normalise water floor
     void normaliseUnderwaterFloorToDirt(int cx, int cy, int cz) {
         Chunk* chunk = getChunk(cx, cy, cz);
         if (!chunk || !chunk->isGenerated) return;
@@ -241,7 +339,6 @@ private:
         }
     }
 
-    // Paint a small sand "disk" at (centerX, centerZ) on the underwater floor
     void paintSandPatchAt(int centerX, int centerZ, int minY, int maxY, int radius, int depth, std::mt19937& rng) {
         int r2 = radius * radius;
         for (int dx = -radius; dx <= radius; ++dx) {
@@ -254,7 +351,6 @@ private:
                 int floorY = findUnderwaterFloorY(wx, minY, maxY, wz);
                 if (floorY < 0) continue;
 
-                // Convert to sand
                 for (int d = 0; d < depth; ++d) {
                     int y = floorY - d;
                     if (y <= 0) break;
@@ -268,7 +364,6 @@ private:
         }
     }
 
-    // Generate underwater sand patches within a chunk segment.
     void generateUnderwaterSandPatches(int cx, int cy, int cz) {
         Chunk* chunk = getChunk(cx, cy, cz);
         if (!chunk || !chunk->isGenerated || chunk->isFullyProcessed) return;
@@ -285,18 +380,15 @@ private:
         std::uniform_int_distribution<int> radiusDist(2, 4);
         std::uniform_int_distribution<int> groupCountDist(1, 2);
 
-        // Place candidate centers on coarse grid
         const int STEP = 4;
         for (int lx = 0; lx < CHUNK_SIZE; lx += STEP) {
             for (int lz = 0; lz < CHUNK_SIZE; lz += STEP) {
                 int wx = baseX + lx;
                 int wz = baseZ + lz;
 
-                // Must have a valid underwater floor within this vertical segment
                 int floorY = findUnderwaterFloorY(wx, baseY, baseY + CHUNK_HEIGHT - 2, wz);
                 if (floorY < 0) continue;
 
-                // Low-frequency noise to clump patches
                 double n = perlin.noise(wx * 0.02, 123.45, wz * 0.02) * 0.5 + 0.5; // [0,1]
                 if (!(n > 0.65 && r01(rng) < 0.25f)) continue;
                 int groups = groupCountDist(rng);
@@ -304,7 +396,6 @@ private:
                 int depth = (r01(rng) < 0.2f) ? 2 : 1;
 
                 for (int g = 0; g < groups; ++g) {
-                    // small jitter around the seed to create grouped patches
                     int jx = wx + static_cast<int>(std::round((r01(rng) - 0.5f) * baseRadius * 1.5f));
                     int jz = wz + static_cast<int>(std::round((r01(rng) - 0.5f) * baseRadius * 1.5f));
                     int r = std::max(1, baseRadius + (int)std::floor((r01(rng) - 0.5f) * 2.0f));
@@ -314,7 +405,6 @@ private:
         }
     }
 
-    // Paint ore sphere
     void paintOreSphere(BlockType oreType, int cxHint, int cyHint, int czHint, int cxWorld, int cyWorld, int czWorld, float radius) {
         int minX = static_cast<int>(std::floor(cxWorld - radius));
         int maxX = static_cast<int>(std::floor(cxWorld + radius));
@@ -355,7 +445,6 @@ private:
         int baseY = cy * CHUNK_HEIGHT;
         int baseZ = cz * CHUNK_SIZE;
 
-        // Intersect Y-range with this segment
         int yMinLocal = std::max(minY, baseY + 1);
         int yMaxLocal = std::min(maxY, baseY + CHUNK_HEIGHT - 2);
         if (yMinLocal > yMaxLocal) return;
@@ -375,7 +464,6 @@ private:
             int sy = yDist(rng);
             int sz = zDist(rng);
 
-            // Must start in stone
             Block* start = getBlockAt(sx, sy, sz);
             if (!start || !start->isSolid || start->type != BLOCK_STONE) continue;
 
@@ -388,7 +476,6 @@ private:
                 float radius = 0.9f + 0.9f * r01(rng);
                 paintOreSphere(oreType, cx, cy, cz, static_cast<int>(std::round(px)), static_cast<int>(std::round(py)), static_cast<int>(std::round(pz)), radius);
 
-                // Biased random drift
                 float yaw = (r01(rng) * 2.0f - 1.0f) * 3.14159265f;
                 float pitch = (r01(rng) * 2.0f - 1.0f) * 0.5f;
                 float stepLen = 1.0f + 0.3f * r01(rng);
@@ -409,50 +496,39 @@ public:
         perlin = PerlinNoise(PERLIN_SEED);
     }
     
-    // Check if chunk indices are within world bounds
     bool isChunkInBounds(int cx, int cy, int cz) const {
         return cx >= 0 && cx < WORLD_CHUNK_SIZE_X && cy >= 0 && cy < WORLD_CHUNK_SIZE_Y && cz >= 0 && cz < WORLD_CHUNK_SIZE_Z;
     }
     
-    // Get or create a chunk at given chunk coordinates
     Chunk* getChunk(int cx, int cy, int cz) {
         if (!isChunkInBounds(cx, cy, cz)) return nullptr;
         ChunkCoord coord{cx, cy, cz};
         auto it = chunks.find(coord);
-
-        // Create new chunk if not exists
         if (it == chunks.end()) {
             auto chunk = std::make_unique<Chunk>(cx, cy, cz);
             Chunk* ptr = chunk.get();
             chunks[coord] = std::move(chunk);
             return ptr;
         }
-
         return it->second.get();
     }
     
-    // Check if chunk is already created in memory
     bool isChunkLoaded(int cx, int cy, int cz) const {
         ChunkCoord coord{cx, cy, cz};
         return chunks.find(coord) != chunks.end();
     }
     
-    // Check if chunk at player position is fully generated and safe for physics
     bool isChunkGeneratedAt(float worldX, float worldY, float worldZ) const {
         int cx = static_cast<int>(std::floor(worldX / CHUNK_SIZE));
         int cy = static_cast<int>(std::floor(worldY / CHUNK_HEIGHT));
         int cz = static_cast<int>(std::floor(worldZ / CHUNK_SIZE));
-        
         if (!isChunkInBounds(cx, cy, cz)) return false;
-        
         ChunkCoord coord{cx, cy, cz};
         auto it = chunks.find(coord);
         if (it == chunks.end()) return false;
-        
         return it->second->isGenerated;
     }
     
-    // Main function for determining terrain height using layered Perlin noise
     int getHeightAt(int x, int z) const {
         static const double WARP_FREQ = 0.0020;
         static const double WARP_AMPLITUDE = 80.0;
@@ -464,7 +540,6 @@ public:
         double warpedX = x + warpX;
         double warpedZ = z + warpZ;
 
-        // Domain rotation - skewed cube coordinates
         static const double g = 0.5773502691896258;
         static const double s = -0.2113248654051871;
         auto sampleNoise3D = [&](double freq) {
@@ -494,7 +569,6 @@ public:
         const double detail = fbmNoise(0.02,  2);
         double heightFactor = 0.55 * hills + 0.40 * continental + 0.05 * detail;
 
-        // Remove terracing
         auto smoothstep = [](double a, double b, double x) {
             double t = std::clamp((x - a) / (b - a), 0.0, 1.0);
             return t * t * (3.0 - 2.0 * t);
@@ -522,38 +596,30 @@ public:
         return height;
     }
 
-    
-    // Generate a single chunk's base terrain
     void generateChunk(int cx, int cy, int cz) {
         Chunk* chunk = getChunk(cx, cy, cz);
         if (!chunk || chunk->isGenerated) return;
         
-        // Chunk world-coordinate origin
         int baseX = cx * CHUNK_SIZE;
         int baseY = cy * CHUNK_HEIGHT;
         int baseZ = cz * CHUNK_SIZE;
         
-        // Loop through every position in chunk column section
         for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
             for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
                 int worldX = baseX + lx;
                 int worldZ = baseZ + lz;
-
-                // Determine base terrain height for this column
                 int columnHeight = getHeightAt(worldX, worldZ);
                 
                 for (int ly = 0; ly < CHUNK_HEIGHT; ++ly) {
                     int worldY = baseY + ly;
                     Block& block = chunk->blocks[lx][ly][lz];
 
-                    // Bedrock at bottom of the world
                     if (worldY == 0) {
                         block.isSolid = true;
                         block.type = BLOCK_BEDROCK;
                         continue;
                     }
 
-                    // Solid terrain up to columnHeight, air above
                     if (worldY <= columnHeight && worldY < WORLD_SIZE_Y) {
                         block.isSolid = true;
                         if (worldY >= columnHeight - 3) {
@@ -572,7 +638,6 @@ public:
         chunk->isDirty = true;
     }
 
-    // Fill air blocks below WATER_LEVEL
     void generateWater(int cx, int cy, int cz) {
         Chunk* chunk = getChunk(cx, cy, cz);
         if (!chunk || !chunk->isGenerated) return;
@@ -587,13 +652,9 @@ public:
             for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
                 for (int ly = 0; ly < CHUNK_HEIGHT; ++ly) {
                     int worldY = baseY + ly;
-                    
-                    // Only process blocks below water level
                     if (worldY >= WATER_LEVEL) continue;
                     
                     Block& block = chunk->blocks[lx][ly][lz];
-                    
-                    // If it's air, convert to water
                     if (!block.isSolid) {
                         block.isSolid = true;
                         block.type = BLOCK_WATER;
@@ -603,9 +664,7 @@ public:
             }
         }
         
-        if (waterAdded) {
-            chunk->isDirty = true;
-        }
+        if (waterAdded) chunk->isDirty = true;
     }
 
     void generateCaves(int cx, int cy, int cz) {
@@ -613,12 +672,10 @@ public:
         Chunk* baseChunk = getChunk(cx, cy, cz);
         if (!baseChunk || !baseChunk->isGenerated || baseChunk->isFullyProcessed) return;
 
-        // Random generator for this chunk column
         unsigned int caveSeed = static_cast<unsigned int>(PERLIN_SEED) ^ (cx * 0xA511E9B3u) ^ (cz * 0x63288691u);
         std::mt19937 caveRng(caveSeed);
         std::uniform_real_distribution<double> rand01(0.0, 1.0);
 
-        // Decide how many caves to carve in this column
         int caveCount;
         double chance = rand01(caveRng);
         if (chance < 0.1) caveCount = 0;
@@ -627,22 +684,18 @@ public:
         else caveCount = 3;
         if (caveCount <= 0) return;
 
-        // Get surface height for a given (wx, wz)
         auto getSurfaceY = [&](int wx, int wz) { return getHeightAt(wx, wz); };
 
-        // Lambda to recursively carve a cave tunnel
-        std::function<void(double,double,double,double,double,double,int,bool)> carveTunnel = [&](double x, double y, double z, double yaw, double pitch, double radius, int steps, bool allowBranch) {
+        std::function<void(double,double,double,double,double,double,int,bool)> carveTunnel =
+        [&](double x, double y, double z, double yaw, double pitch, double radius, int steps, bool allowBranch) {
             const double stepSize = 0.5;
             for (int i = 0; i < steps; ++i) {
-                // Move along the current direction vector
                 x += std::cos(yaw) * std::cos(pitch) * stepSize;
                 y += std::sin(pitch) * stepSize;
                 z += std::sin(yaw) * std::cos(pitch) * stepSize;
 
-                // Stop if out of world bounds
                 if (x < 0 || x >= WORLD_SIZE_X || y < 0 || y >= WORLD_SIZE_Y || z < 0 || z >= WORLD_SIZE_Z) break;
 
-                // Compute carving region
                 int minX = static_cast<int>(std::floor(x - radius));
                 int maxX = static_cast<int>(std::floor(x + radius));
                 int minY = static_cast<int>(std::floor(y - radius));
@@ -651,19 +704,16 @@ public:
                 int maxZ = static_cast<int>(std::floor(z + radius));
                 double radiusSq = radius * radius;
 
-                // Remove blocks within the sphere
                 for (int xi = minX; xi <= maxX; ++xi) {
                     for (int yi = minY; yi <= maxY; ++yi) {
                         for (int zi = minZ; zi <= maxZ; ++zi) {
                             if (xi < 0 || xi >= WORLD_SIZE_X || yi < 0 || yi >= WORLD_SIZE_Y || zi < 0 || zi >= WORLD_SIZE_Z) continue;
 
-                            // Check distance from tunnel center
                             double dx = xi + 0.5 - x;
                             double dy = yi + 0.5 - y;
                             double dz = zi + 0.5 - z;
                             if ((dx*dx + dy*dy + dz*dz) > radiusSq) continue;
 
-                            // Only carve if the chunk containing this block is generated
                             int cx2 = xi / CHUNK_SIZE;
                             int cy2 = yi / CHUNK_HEIGHT;
                             int cz2 = zi / CHUNK_SIZE;
@@ -671,7 +721,6 @@ public:
                             Block* block = getBlockAt(xi, yi, zi);
                             if (!block) continue;
 
-                            // Don't carve through water blocks to prevent flooded caves
                             if (block->isSolid) {
                                 if (block->type != BLOCK_WATER) {
                                     block->isSolid = false;
@@ -682,7 +731,6 @@ public:
                     }
                 }
 
-                // Possibly create one branch at halfway point
                 if (allowBranch && i == steps / 2) {
                     if (rand01(caveRng) < 0.2) {
                         double branchYaw = yaw + ((rand01(caveRng) < 0.5) ? 1 : -1) * (0.78539816339 + 0.78539816339 * rand01(caveRng));
@@ -694,7 +742,6 @@ public:
                     }
                 }
 
-                // Gradually randomise direction for natural curves
                 yaw += std::uniform_real_distribution<double>(-0.1, 0.1)(caveRng);
                 pitch += std::uniform_real_distribution<double>(-0.05, 0.05)(caveRng);
                 if (pitch < -1.5) pitch = -1.5;
@@ -702,46 +749,36 @@ public:
             }
         };
 
-        // Carve each cave in this chunk column
         std::uniform_int_distribution<int> xLocalDist(0, CHUNK_SIZE - 1);
         std::uniform_int_distribution<int> zLocalDist(0, CHUNK_SIZE - 1);
 
         for (int c = 0; c < caveCount; ++c) {
-            // Random start position within this chunk column
             int lx = xLocalDist(caveRng);
             int lz = zLocalDist(caveRng);
             int wx = cx * CHUNK_SIZE + lx;
             int wz = cz * CHUNK_SIZE + lz;
 
-            // Choose a random starting Y between bedrock+5 and surface height at (wx, wz)
             int surfaceY = getSurfaceY(wx, wz);
             if (surfaceY < 5) surfaceY = 5;
             std::uniform_int_distribution<int> yDist(5, surfaceY);
             int wy = yDist(caveRng);
 
-            // Cave type
             bool spaghetti = (rand01(caveRng) < 0.5);
             double caveRadius = spaghetti ? std::uniform_real_distribution<double>(1.5, 2.5)(caveRng) : std::uniform_real_distribution<double>(1.0, 1.4)(caveRng);
 
-            // Tunnel length based on type
-            int lengthSteps;
-            if (spaghetti) lengthSteps = 2 * std::uniform_int_distribution<int>(40, 80)(caveRng);
-            else lengthSteps = 2 * std::uniform_int_distribution<int>(15, 40)(caveRng);
+            int lengthSteps = spaghetti ? 2 * std::uniform_int_distribution<int>(40, 80)(caveRng)
+                                        : 2 * std::uniform_int_distribution<int>(15, 40)(caveRng);
 
-            // Initial direction angles
             double yawAngle   = std::uniform_real_distribution<double>(0.0, 2*M_PI)(caveRng);
             double pitchAngle = std::uniform_real_distribution<double>(-0.2, 0.2)(caveRng);
 
-            // Carve out this cave tunnel
             carveTunnel(wx + 0.5, wy + 0.5, wz + 0.5, yawAngle, pitchAngle, caveRadius, lengthSteps, true);
         }
 
         updateCaveExposedSurfacesForColumn(cx, cz);
     }
 
-    // Convert any dirt block that now has air immediately above it into grass.
     void updateCaveExposedSurfacesForColumn(int cx, int cz) {
-        // Iterate through all vertical chunk segments in this column
         for (int cy = 0; cy < WORLD_CHUNK_SIZE_Y; ++cy) {
             Chunk* chunk = getChunk(cx, cy, cz);
             if (!chunk || !chunk->isGenerated) continue;
@@ -758,7 +795,6 @@ public:
                         int worldY = cy * CHUNK_HEIGHT + y;
                         int worldZ = cz * CHUNK_SIZE + z;
 
-                        // Check if the block above is air
                         bool hasAirAbove = false;
                         if (worldY + 1 >= WORLD_SIZE_Y) {
                             hasAirAbove = true;
@@ -779,34 +815,29 @@ public:
         }
     }
 
-    // Generate ores as clustered veins
     void generateOres(int cx, int cy, int cz) {
         Chunk* chunk = getChunk(cx, cy, cz);
         if (!chunk || !chunk->isGenerated) return;
 
-        // Coal
         generateOreVeinsForType(cx, cy, cz,
                                 BLOCK_COAL_ORE,
                                 COAL_ORE_MIN_Y, COAL_ORE_MAX_Y,
-                                /*triesMin*/ 2, /*triesMax*/ 5,
-                                /*veinSizeMin*/ 3, /*veinSizeMax*/ 14);
+                                2, 5,
+                                3, 14);
 
-        // Iron
         generateOreVeinsForType(cx, cy, cz,
                                 BLOCK_IRON_ORE,
                                 IRON_ORE_MIN_Y, IRON_ORE_MAX_Y,
-                                /*triesMin*/ 2, /*triesMax*/ 4,
-                                /*veinSizeMin*/ 2, /*veinSizeMax*/ 12);
+                                2, 4,
+                                2, 12);
     }
     
-    // Update surface blocks
     void updateSurfaceBlocks(int cx, int cy, int cz) {
         Chunk* chunk = getChunk(cx, cy, cz);
         if (!chunk || !chunk->isGenerated) return;
 
         for (int x = 0; x < CHUNK_SIZE; ++x) {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
-                // Find the topmost solid block in this column within the chunk
                 int topYLocal = -1;
                 for (int y = CHUNK_HEIGHT - 1; y >= 0; --y) {
                     if (chunk->blocks[x][y][z].isSolid) {
@@ -821,22 +852,18 @@ public:
                 int worldZ = cz * CHUNK_SIZE + z;
                 Block& topBlock = chunk->blocks[x][topYLocal][z];
 
-                // Skip non-terrain tops
                 if (topBlock.type == BLOCK_WATER ||
                     topBlock.type == BLOCK_LEAVES ||
                     topBlock.type == BLOCK_LOG) {
                     continue;
                 }
 
-                // Only consider it surface if the block above is air (or above world bounds)
                 bool airAbove = (worldY + 1 >= WORLD_SIZE_Y) ? true : !isSolidAt(worldX, worldY + 1, worldZ);
                 if (!airAbove) continue;
 
-                // Turn dirt into grass at the surface
                 if (topBlock.type == BLOCK_DIRT) topBlock.type = BLOCK_GRASS;
                 if (topBlock.type != BLOCK_GRASS) continue;
 
-                // Ensure exactly two dirt layers below the grass (if solid)
                 for (int i = 1; i <= 2; ++i) {
                     int yBelow = topYLocal - i;
                     if (yBelow < 0) break;
@@ -852,7 +879,6 @@ public:
                     }
                 }
 
-                // Convert any deeper dirt (beyond 2 layers down) back to stone to avoid thick shelves
                 for (int i = 3; i <= 8; ++i) {
                     int yDeep = topYLocal - i;
                     if (yDeep < 0) break;
@@ -866,7 +892,7 @@ public:
         }
     }
     
-    // Load all chunks within a given radius of a world position
+public:
     void loadChunksAroundPosition(float worldX, float worldZ, float playerX = -9999.0f, float playerY = -9999.0f, float playerZ = -9999.0f) {
         int centerChunkX = static_cast<int>(std::floor(worldX / CHUNK_SIZE));
         int centerChunkZ = static_cast<int>(std::floor(worldZ / CHUNK_SIZE));
@@ -874,7 +900,7 @@ public:
         int playerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
         bool hasPlayerPos = (playerX > -9000.0f);
         
-        // Pass 1: Ensure base terrain for all chunks in range is generated
+        // Pass 1: base terrain
         for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
             for (int cz = centerChunkZ - CHUNK_LOAD_DISTANCE; cz <= centerChunkZ + CHUNK_LOAD_DISTANCE; ++cz) {
                 int dx = cx - centerChunkX;
@@ -893,7 +919,7 @@ public:
             }
         }
         
-        // Pass 2: Generate water in all chunks below water level
+        // Pass 2: water
         for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
             for (int cz = centerChunkZ - CHUNK_LOAD_DISTANCE; cz <= centerChunkZ + CHUNK_LOAD_DISTANCE; ++cz) {
                 int dx = cx - centerChunkX;
@@ -909,7 +935,7 @@ public:
             }
         }
 
-        // Pass 2.5: Underwater sand patches
+        // Pass 2.5: underwater sand
         for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
             for (int cz = centerChunkZ - CHUNK_LOAD_DISTANCE; cz <= centerChunkZ + CHUNK_LOAD_DISTANCE; ++cz) {
                 int dx = cx - centerChunkX;
@@ -924,7 +950,7 @@ public:
             }
         }
         
-        // Pass 3: Caves in all newly generated chunks
+        // Pass 3: caves
         for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
             for (int cz = centerChunkZ - CHUNK_LOAD_DISTANCE; cz <= centerChunkZ + CHUNK_LOAD_DISTANCE; ++cz) {
                 int dx = cx - centerChunkX;
@@ -940,7 +966,7 @@ public:
             }
         }
         
-        // Pass 4: Populate ores in all generated chunks
+        // Pass 4: ores
         for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
             for (int cz = centerChunkZ - CHUNK_LOAD_DISTANCE; cz <= centerChunkZ + CHUNK_LOAD_DISTANCE; ++cz) {
                 int dx = cx - centerChunkX;
@@ -955,7 +981,7 @@ public:
             }
         }
         
-        // Pass 5: Update surface, then generate trees
+        // Pass 5: surface, trees, tall grass; finalize
         for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
             for (int cz = centerChunkZ - CHUNK_LOAD_DISTANCE; cz <= centerChunkZ + CHUNK_LOAD_DISTANCE; ++cz) {
                 int dx = cx - centerChunkX;
@@ -967,7 +993,10 @@ public:
                     Chunk* chunk = getChunk(cx, cy, cz);
                     if (chunk && chunk->isGenerated && !chunk->isFullyProcessed) {
                         updateSurfaceBlocks(cx, cy, cz);
-                        if (cy == WORLD_CHUNK_SIZE_Y - 1) generateTreesForColumn(cx, cz);
+                        if (cy == WORLD_CHUNK_SIZE_Y - 1) {
+                            generateTreesForColumn(cx, cz);
+                            generateFoliageForColumn(cx, cz);
+                        }
                         chunk->isFullyProcessed = true;
                     }
                 }
@@ -975,7 +1004,6 @@ public:
         }
     }
     
-    // Unload chunks far from the given position to free memory, still keeping them in the chunks map
     void unloadDistantChunks(float worldX, float worldZ) {
         int centerChunkX = static_cast<int>(std::floor(worldX / CHUNK_SIZE));
         int centerChunkZ = static_cast<int>(std::floor(worldZ / CHUNK_SIZE));
@@ -985,15 +1013,12 @@ public:
             int dx = coord.x - centerChunkX;
             int dz = coord.z - centerChunkZ;
             int distSq = dx * dx + dz * dz;
-
-            // Unload if beyond (CHUNK_LOAD_DISTANCE + 2) radius (extra buffer)
             if (distSq > (CHUNK_LOAD_DISTANCE + 2) * (CHUNK_LOAD_DISTANCE + 2)) toUnload.push_back(coord);
         }
 
         for (const auto& coord : toUnload) loadedChunks.erase(coord);
     }
     
-    // Check if a world-space coordinate is solid
     bool isSolidAt(int x, int y, int z) const {
         if (x < 0 || x >= WORLD_SIZE_X ||
             y < 0 || y >= WORLD_SIZE_Y ||
@@ -1009,13 +1034,10 @@ public:
         int bz = z % CHUNK_SIZE;
         auto it = chunks.find({cx, cy, cz});
 
-        // If chunk doesn't exist or isn't generated yet, treat as non-solid
-        // This prevents false positives during chunk loading
         if (it == chunks.end() || !it->second->isGenerated) return false;
         return it->second->blocks[bx][by][bz].isSolid;
     }
     
-    // Get a pointer to the Block at world-space coordinates
     Block* getBlockAt(int x, int y, int z) const {
         if (x < 0 || x >= WORLD_SIZE_X ||
             y < 0 || y >= WORLD_SIZE_Y ||
@@ -1033,7 +1055,6 @@ public:
         return &it->second->blocks[bx][by][bz];
     }
     
-    // Check if block at world-space coordinates is opaque
     bool isOpaque(int x, int y, int z) const {
         if (x < 0 || x >= WORLD_SIZE_X || 
             y < 0 || y >= WORLD_SIZE_Y || 
@@ -1045,12 +1066,10 @@ public:
         return block->type != BLOCK_WATER && block->type != BLOCK_LEAVES;
     }
     
-    // Mark a chunk (and its neighbors) as needing a mesh update
     void markChunkDirty(int cx, int cy, int cz) {
         if (Chunk* chunk = getChunk(cx, cy, cz)) {
             chunk->isDirty = true;
         }
-        // Mark adjacent chunks dirty so their mesh will update at boundaries
         if (Chunk* c = getChunk(cx - 1, cy, cz)) c->isDirty = true;
         if (Chunk* c = getChunk(cx + 1, cy, cz)) c->isDirty = true;
         if (Chunk* c = getChunk(cx, cy - 1, cz)) c->isDirty = true;
@@ -1059,12 +1078,10 @@ public:
         if (Chunk* c = getChunk(cx, cy, cz + 1)) c->isDirty = true;
     }
     
-    // Access the set of currently loaded (active) chunks
     const std::unordered_set<ChunkCoord, std::hash<ChunkCoord>>& getLoadedChunks() const {
         return loadedChunks;
     }
     
-    // Access the map of all chunk data (generated chunks in memory)
     const std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>>& getChunks() const {
         return chunks;
     }
