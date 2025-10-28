@@ -264,7 +264,7 @@ public:
         if (keyCode == 32) { // Space
             if (pressed && !lastSpaceKeyState) {
                 float timeSinceLastPress = currentTime - lastSpaceKeyPressTime;
-                if (timeSinceLastPress < DOUBLE_TAP_TIME) {
+                if (timeSinceLastPress < DOUBLE_TAP_TIME && !isPlayerInWater()) {
                     isFlying = !isFlying;
                     if (isFlying) {
                         player.velocityY = 0.0f;
@@ -275,7 +275,7 @@ public:
                 lastSpaceKeyPressTime = currentTime;
             }
 
-            if (pressed && player.onGround && !isFlying) {
+            if (pressed && player.onGround && !isFlying && !isPlayerInWater()) {
                 player.velocityY = JUMP_VELOCITY;
                 player.onGround = false;
             }
@@ -372,7 +372,9 @@ private:
     // Solid for physics (does NOT include tall grass)
     bool isBlockSolid(int x, int y, int z) const {
         const Block* b = world.getBlockAt(x, y, z);
-        return b ? b->isSolid : true;
+        if (!b) return true;
+        if (b->type == BLOCK_WATER) return false;
+        return b->isSolid;
     }
 
     // Selectable for raycast (includes tall grass even though non-solid)
@@ -386,6 +388,20 @@ private:
     bool isWaterBlock(int x, int y, int z) const {
         const Block* b = world.getBlockAt(x, y, z);
         return b && (b->type == BLOCK_WATER);
+    }
+
+    // Check if the player is in water (any part of their bounding box)
+    bool isPlayerInWater() const {
+        int px = static_cast<int>(std::floor(player.x));
+        int pz = static_cast<int>(std::floor(player.z));
+        int footY = static_cast<int>(std::floor(player.y + 0.01f));
+        int headY = static_cast<int>(std::floor(player.y + PLAYER_HEIGHT - 0.01f));
+        for (int by = footY; by <= headY; ++by) {
+            if (isWaterBlock(px, by, pz)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     bool findSafeSpawn(float startX, float startZ, Vector3& outPos) {
@@ -449,7 +465,6 @@ private:
         for (int bx = std::floor(minX); bx <= std::floor(maxX); ++bx) {
             for (int by = std::floor(minY); by <= std::floor(maxY); ++by) {
                 for (int bz = std::floor(minZ); bz <= std::floor(maxZ); ++bz) {
-                    // Tall grass is non-solid so isBlockSolid() returns false for it.
                     if (isBlockSolid(bx, by, bz)) {
                         return true;
                     }
@@ -499,6 +514,51 @@ private:
             return;
         }
 
+        // Check for water physics
+        bool inWater = isPlayerInWater();
+        if (inWater) {
+            // Swimming physics: slow gravity and upward swim on space
+            if (keys[32]) {
+                // Swim up
+                player.velocityY = 5.0f; // Upward velocity when holding space
+            } else {
+                // Slowly sink
+                player.velocityY += (GRAVITY * 0.2f) * dt;
+            }
+
+            float newY = player.y + player.velocityY * dt;
+            if (player.velocityY > 0) {
+                if (!isColliding(player.x, newY, player.z)) {
+                    player.y = newY;
+                } else {
+                    player.y = std::floor(newY + PLAYER_HEIGHT) - PLAYER_HEIGHT;
+                    player.velocityY = 0.0f;
+                }
+            } else {
+                if (!isColliding(player.x, newY, player.z)) {
+                    player.y = newY;
+                    player.onGround = false;
+                } else {
+                    player.y = std::floor(newY) + 1.0f;
+                    player.velocityY = 0.0f;
+                    player.onGround = true;
+                }
+            }
+
+            checkGround();
+            if (isColliding(player.x, player.y, player.z)) {
+                player.x = lastSafePos.x;
+                player.y = lastSafePos.y;
+                player.z = lastSafePos.z;
+                player.velocityY = 0.0f;
+                player.onGround = true;
+            } else {
+                lastSafePos = { player.x, player.y, player.z };
+            }
+            return;
+        }
+
+        // Normal physics
         player.velocityY += GRAVITY * dt;
         float newY = player.y + player.velocityY * dt;
 
@@ -572,6 +632,11 @@ private:
         if (isFlying) {
             baseSpeed = FLY_SPEED;
             isSprinting = false;
+        }
+        // Reduce horizontal speed if in water
+        if (!isFlying && isPlayerInWater()) {
+            isSprinting = false;
+            baseSpeed *= 0.5f;
         }
         float distance = baseSpeed * dt;
 
