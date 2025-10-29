@@ -17,7 +17,7 @@ The game is playable via any modern web browser:
 - [ ] Lighting Engine (Day/Night Cycle + Block Light Emission)
 - [x] Water Lakes/Rivers/Oceans
 - [x] Distance Fog
-- [ ] Tall Grass & Flowers
+- [x] Tall Grass & Flowers
 - [ ] Flowable Liquids
 - [ ] Mobs (Animals + Hostile)
 - [ ] Main Menu
