@@ -10,65 +10,23 @@
 #include <random>
 #include <functional>
 
-enum BlockType {
-    BLOCK_STONE,
-    BLOCK_DIRT,
-    BLOCK_PLANKS,
-    BLOCK_GRASS,
-    BLOCK_BEDROCK,
-    BLOCK_COAL_ORE,
-    BLOCK_IRON_ORE,
-    BLOCK_LOG,
-    BLOCK_LEAVES,
-    BLOCK_WATER,
-    BLOCK_SAND,
-    BLOCK_TALL_GRASS,
-    BLOCK_ORANGE_FLOWER,
-    BLOCK_BLUE_FLOWER
-};
+#include "../shared/config.hpp"
+#include "../shared/types.hpp"
+#include "../shared/chunk.hpp"
+#include "perlin_noise.hpp"
 
-enum FaceDirection {
-    FACE_FRONT = 0,
-    FACE_BACK = 1,
-    FACE_RIGHT = 2,
-    FACE_LEFT = 3,
-    FACE_TOP = 4,
-    FACE_BOTTOM = 5
-};
-
-struct Block {
-    bool isSolid = false;
-    BlockType type = BLOCK_STONE;
-};
-
-struct ChunkCoord {
-    int x, y, z;
-    bool operator==(const ChunkCoord& other) const {
-        return x == other.x && y == other.y && z == other.z;
+// Fallback for std::lerp if not available
+namespace {
+    template<typename T>
+    inline T lerp_fallback(T a, T b, T t) {
+        return a + t * (b - a);
     }
-};
-
-namespace std {
-    template <>
-    struct hash<ChunkCoord> {
-        size_t operator()(const ChunkCoord& c) const {
-            return ((hash<int>()(c.x) ^ (hash<int>()(c.y) << 1)) >> 1) ^ (hash<int>()(c.z) << 1);
-        }
-    };
 }
 
-class Chunk {
-public:
-    Block blocks[CHUNK_SIZE][CHUNK_HEIGHT][CHUNK_SIZE]; // [x][y][z]
-    bool isGenerated = false;
-    bool isDirty = false;
-    bool isFullyProcessed = false;
-    ChunkCoord coord;
-    Chunk() = default;
-    Chunk(int cx, int cy, int cz) : coord{cx, cy, cz} {}
-};
+class Hub; // Forward declaration for friend
 
 class World {
+    friend class Hub; // Allow Hub to access private generation methods
 private:
     PerlinNoise perlin;
     std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>> chunks;
@@ -578,7 +536,7 @@ public:
             double u = v * steps;
             double f = u - std::floor(u);
             double u2 = std::floor(u) + smoothstep(0.3, 0.7, f);
-            return std::lerp(v, u2 / steps, softness);
+            return lerp_fallback(v, u2 / steps, softness);
         };
 
         heightFactor = softTerrace(heightFactor, 12.0, 0.10);
@@ -586,7 +544,7 @@ public:
         heightFactor = std::clamp(std::pow(heightFactor, valleyStretch), 0.0, 1.0);
 
         double mountainMask = smoothstep(0.58, 0.82, 0.6 * hills + 0.4 * continental);
-        double verticalScaleMul = std::lerp(4.0, 18.0, mountainMask);
+        double verticalScaleMul = lerp_fallback(4.0, 18.0, mountainMask);
         double scaledHeight = heightFactor * (TERRAIN_HEIGHT_SCALE * verticalScaleMul) + 10.0;
 
         int height = static_cast<int>(scaledHeight);
@@ -1067,8 +1025,13 @@ public:
     }
     
     void markChunkDirty(int cx, int cy, int cz) {
+        std::cout << "[WORLD] markChunkDirty called for chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
         if (Chunk* chunk = getChunk(cx, cy, cz)) {
+            bool wasDirty = chunk->isDirty;
             chunk->isDirty = true;
+            std::cout << "[WORLD] Marked chunk (" << cx << "," << cy << "," << cz << ") as dirty (was " << (wasDirty ? "already dirty" : "clean") << ")" << std::endl;
+        } else {
+            std::cout << "[WORLD] WARNING: Chunk (" << cx << "," << cy << "," << cz << ") not found!" << std::endl;
         }
         if (Chunk* c = getChunk(cx - 1, cy, cz)) c->isDirty = true;
         if (Chunk* c = getChunk(cx + 1, cy, cz)) c->isDirty = true;
@@ -1084,6 +1047,41 @@ public:
     
     const std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>>& getChunks() const {
         return chunks;
+    }
+
+    // Networking methods for future client/server architecture
+    // Populate a chunk from raw arrays (e.g., received from server)
+    void setChunkData(int cx, int cy, int cz, const BlockType types[], const bool solids[]) {
+        if (!isChunkInBounds(cx, cy, cz)) return;
+        
+        Chunk* chunk = getChunk(cx, cy, cz);
+        if (!chunk) return;
+        
+        int idx = 0;
+        for (int x = 0; x < CHUNK_SIZE; ++x) {
+            for (int y = 0; y < CHUNK_HEIGHT; ++y) {
+                for (int z = 0; z < CHUNK_SIZE; ++z) {
+                    chunk->blocks[x][y][z].type = types[idx];
+                    chunk->blocks[x][y][z].isSolid = solids[idx];
+                    ++idx;
+                }
+            }
+        }
+        
+        chunk->isGenerated = true;
+        chunk->isDirty = true;
+        chunk->isFullyProcessed = true;
+        
+        // Add to loaded chunks set so updateDirtyChunks can find it
+        ChunkCoord coord{cx, cy, cz};
+        loadedChunks.insert(coord);
+    }
+    
+    // Erase a chunk and notify mesh manager (caller should call meshManager.removeChunkMesh)
+    void eraseChunk(int cx, int cy, int cz) {
+        ChunkCoord coord{cx, cy, cz};
+        chunks.erase(coord);
+        loadedChunks.erase(coord);
     }
 };
 

@@ -2,11 +2,27 @@
 #ifndef GAME_HPP
 #define GAME_HPP
 
+#include "../client/net.hpp"
+#include "../shared/protocol.hpp"
+#include "../shared/serialization.hpp"
+#include "text_renderer.hpp"
+#include <sstream>
+
+enum class GameState {
+    LOADING,           // Initial loading
+    CONNECTING,        // Connecting to server (online mode)
+    WAITING_FOR_WORLD, // Waiting for world data from server
+    PLAYING,           // Normal gameplay
+    DISCONNECTED       // Disconnected from server
+};
+
 class Game {
 public:
     bool pointerLocked = false;
+    GameState gameState = GameState::LOADING;
     Shader* shader;
     Shader* outlineShader;
+    TextRenderer textRenderer;
     MeshManager meshManager;
     World world;
     Camera camera;
@@ -31,6 +47,21 @@ public:
     int lastPlayerChunkX = -999;
     int lastPlayerChunkZ = -999;
     Vector3 lastSafePos { SPAWN_X, SPAWN_Y + 1.6f, SPAWN_Z };
+    
+    // Network client
+    NetworkClient netClient;
+    bool isOnlineMode = false;
+    int lastInterestChunkX = -9999;
+    int lastInterestChunkZ = -9999;
+    std::unordered_map<ChunkCoord, int> chunkRevisions; // Track revisions for reconciliation
+    float lastPoseSendTime = 0.0f;
+    const float POSE_SEND_INTERVAL = 0.1f; // 10 Hz
+    
+    // Loading and connection status
+    std::string loadingStatus = "Initializing...";
+    bool hasReceivedFirstChunk = false;
+    int chunksLoaded = 0;
+    bool wasConnected = false; // Track if we were previously connected
 
     Game() : shader(nullptr), outlineShader(nullptr), player(SPAWN_X, SPAWN_Y, SPAWN_Z) { 
         std::cout << "Game Constructed - Player Spawn: (" << SPAWN_X << ", " << SPAWN_Y << ", " << SPAWN_Z << ")" << std::endl;
@@ -188,18 +219,82 @@ public:
         glGenBuffers(1, &outlineVBO);
 
         // Initialise and generate the world
+        loadingStatus = "Initializing world...";
         world.initialise();
 
-        // Load initial chunks around spawn
-        std::cout << "Loading initial chunks around spawn..." << std::endl;
-        world.loadChunksAroundPosition(SPAWN_X, SPAWN_Z);
-        
-        // Generate initial chunk meshes
-        std::cout << "Generating initial chunk meshes..." << std::endl;
-        for (const auto& coord : world.getLoadedChunks()) {
-            meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+        // Check for network mode
+        const char* wsUrl = std::getenv("GAME_WS_URL");
+        if (wsUrl && wsUrl[0] != '\0') {
+            std::cout << "[GAME] Starting in ONLINE mode" << std::endl;
+            isOnlineMode = true;
+            gameState = GameState::CONNECTING;
+            loadingStatus = "Connecting to server...";
+            
+            // Setup message handler
+            netClient.setOnMessage([this](const std::string& msg) {
+                this->handleServerMessage(msg);
+            });
+            
+            // Setup connection handler - send hello and set_interest when connected
+            netClient.setOnConnect([this]() {
+                std::cout << "[GAME] Connection established, sending hello" << std::endl;
+                loadingStatus = "Connected! Requesting world data...";
+                gameState = GameState::WAITING_FOR_WORLD;
+                wasConnected = true;
+                
+                int currentChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
+                int currentChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
+                
+                sendHelloMessage();
+                sendInterestMessage(currentChunkX, currentChunkZ);
+                
+                // Update tracking to prevent resending
+                lastPlayerChunkX = currentChunkX;
+                lastPlayerChunkZ = currentChunkZ;
+                lastInterestChunkX = currentChunkX;
+                lastInterestChunkZ = currentChunkZ;
+            });
+            
+            // Setup disconnection handler
+            netClient.setOnDisconnect([this]() {
+                std::cout << "[GAME] Disconnected from server" << std::endl;
+                gameState = GameState::DISCONNECTED;
+                loadingStatus = "Disconnected from server";
+            });
+            
+            // Connect to server
+            if (netClient.connect(wsUrl)) {
+                std::cout << "[GAME] Waiting for connection..." << std::endl;
+            } else {
+                std::cerr << "[GAME] Failed to connect, falling back to offline mode" << std::endl;
+                isOnlineMode = false;
+                gameState = GameState::LOADING;
+            }
+        } else {
+            std::cout << "[GAME] Starting in OFFLINE mode (no GAME_WS_URL set)" << std::endl;
+            isOnlineMode = false;
         }
-        std::cout << "Loaded " << world.getLoadedChunks().size() << " chunks" << std::endl;
+
+        // Only load chunks locally if in offline mode
+        if (!isOnlineMode) {
+            // Load initial chunks around spawn
+            loadingStatus = "Generating terrain...";
+            std::cout << "Loading initial chunks around spawn..." << std::endl;
+            world.loadChunksAroundPosition(SPAWN_X, SPAWN_Z);
+            
+            // Generate initial chunk meshes
+            loadingStatus = "Building meshes...";
+            std::cout << "Generating initial chunk meshes..." << std::endl;
+            for (const auto& coord : world.getLoadedChunks()) {
+                meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                chunksLoaded++;
+            }
+            std::cout << "Loaded " << world.getLoadedChunks().size() << " chunks" << std::endl;
+            gameState = GameState::PLAYING;
+            loadingStatus = "Ready!";
+        } else {
+            std::cout << "[GAME] Skipping local chunk generation (online mode)" << std::endl;
+        }
 
         // Make sure that the player spawns in a good spot
         Vector3 spawnPos;
@@ -220,8 +315,8 @@ public:
         camera.y = player.y + 1.6f;
         camera.z = player.z;
         
-        lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
-        lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
+        // Don't initialize lastPlayerChunkX/Z here - keep them at -999/-999
+        // so that hello message gets sent on first updateChunks() call
 
         int canvasWidth, canvasHeight;
         emscripten_get_canvas_element_size("canvas", &canvasWidth, &canvasHeight);
@@ -236,6 +331,11 @@ public:
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+        // Initialize text renderer
+        if (!textRenderer.init(canvasWidth, canvasHeight)) {
+            std::cerr << "Failed to initialize text renderer" << std::endl;
+        }
+
         lastFrame = std::chrono::steady_clock::now();
     }
 
@@ -243,15 +343,27 @@ public:
         deltaTime = calculateDeltaTime();
         gameTime += deltaTime;
 
-        processInput(deltaTime);
+        // Only process game logic when in PLAYING state
+        if (gameState == GameState::PLAYING) {
+            processInput(deltaTime);
+            updateChunks();
+            applyPhysics(deltaTime);
 
-        updateChunks();
-        applyPhysics(deltaTime);
+            if (isMoving) bobbingTime += deltaTime;
+            updateHighlightedBlock();
 
-        if (isMoving) bobbingTime += deltaTime;
+            // Send pose updates at 10 Hz
+            if (isOnlineMode && netClient.isConnected()) {
+                lastPoseSendTime += deltaTime;
+                if (lastPoseSendTime >= POSE_SEND_INTERVAL) {
+                    sendPoseUpdate();
+                    lastPoseSendTime = 0.0f;
+                }
+            }
+        }
 
-        updateHighlightedBlock();
-
+        // Always update dirty chunks, even when not PLAYING
+        // This ensures block_update messages from server are rendered immediately
         meshManager.updateDirtyChunks(world);
 
         render();
@@ -322,12 +434,24 @@ public:
         int currentChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
 
         if (currentChunkX != lastPlayerChunkX || currentChunkZ != lastPlayerChunkZ) {
-            world.loadChunksAroundPosition(player.x, player.z);
-            world.unloadDistantChunks(player.x, player.z);
+            // Send interest update if online and chunk changed
+            if (isOnlineMode && netClient.isConnected()) {
+                if (currentChunkX != lastInterestChunkX || currentChunkZ != lastInterestChunkZ) {
+                    sendInterestMessage(currentChunkX, currentChunkZ);
+                    lastInterestChunkX = currentChunkX;
+                    lastInterestChunkZ = currentChunkZ;
+                }
+            }
+            
+            // Only do local generation if offline
+            if (!isOnlineMode) {
+                world.loadChunksAroundPosition(player.x, player.z);
+                world.unloadDistantChunks(player.x, player.z);
 
-            for (const auto& coord : world.getLoadedChunks()) {
-                if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
-                    meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                for (const auto& coord : world.getLoadedChunks()) {
+                    if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
+                        meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                    }
                 }
             }
 
@@ -411,7 +535,10 @@ private:
         const int maxRadius = std::max(8, maxRadiusBlocks);
 
         auto tryColumn = [&](int cx, int cz, Vector3& pos) -> bool {
-            world.loadChunksAroundPosition(cx + 0.5f, cz + 0.5f);
+            // Only load chunks if in offline mode
+            if (!isOnlineMode) {
+                world.loadChunksAroundPosition(cx + 0.5f, cz + 0.5f);
+            }
 
             int h = world.getHeightAt(cx, cz);
             if (h < WATER_LEVEL) return false;
@@ -581,13 +708,17 @@ private:
 
             lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
             lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
-            world.loadChunksAroundPosition(player.x, player.z);
-            world.unloadDistantChunks(player.x, player.z);
-            for (const auto& coord : world.getLoadedChunks()) {
-                if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
-                    meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
-                } else {
-                    meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+            
+            // Only generate chunks locally if in offline mode
+            if (!isOnlineMode) {
+                world.loadChunksAroundPosition(player.x, player.z);
+                world.unloadDistantChunks(player.x, player.z);
+                for (const auto& coord : world.getLoadedChunks()) {
+                    if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
+                        meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                    } else {
+                        meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
+                    }
                 }
             }
             lastSafePos = { player.x, player.y, player.z };
@@ -669,7 +800,8 @@ private:
 
         isMoving = (deltaX != 0.0f || deltaZ != 0.0f) && !isFlying;
 
-        if (deltaX != 0.0f || deltaZ != 0.0f) {
+        // Only do local chunk generation if in offline mode
+        if (!isOnlineMode && (deltaX != 0.0f || deltaZ != 0.0f)) {
             world.loadChunksAroundPosition(player.x + deltaX, player.z + deltaZ);
             world.unloadDistantChunks(player.x + deltaX, player.z + deltaZ);
             for (const auto& coord : world.getLoadedChunks()) {
@@ -697,6 +829,15 @@ private:
         if (!block) return;
         if (block->type == BLOCK_BEDROCK) return;
 
+        // Send edit message if online
+        if (isOnlineMode && netClient.isConnected()) {
+            std::ostringstream msg;
+            msg << "{\"op\":\"edit\",\"kind\":\"remove\",\"w\":[" << x << "," << y << "," << z << "]}";
+            netClient.send(msg.str());
+            std::cout << "[GAME] Sent remove edit: " << x << "," << y << "," << z << std::endl;
+        }
+
+        // Apply optimistically
         auto isPlant = [](BlockType t) {
             return t == BLOCK_TALL_GRASS || t == BLOCK_ORANGE_FLOWER || t == BLOCK_BLUE_FLOWER;
         };
@@ -712,7 +853,9 @@ private:
 
         // Break the supporting block
         block->isSolid = false;
+        block->type = BLOCK_DIRT;
         int cx = x / CHUNK_SIZE, cy = y / CHUNK_HEIGHT, cz = z / CHUNK_SIZE;
+        std::cout << "[GAME] removeBlock optimistic update at (" << x << "," << y << "," << z << ") chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
         world.markChunkDirty(cx, cy, cz);
 
         Block* above = world.getBlockAt(x, y + 1, z);
@@ -748,12 +891,22 @@ private:
                                (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
         if (overlapsPlayer) return;
 
+        // Send edit message if online
+        if (isOnlineMode && netClient.isConnected()) {
+            std::ostringstream msg;
+            msg << "{\"op\":\"edit\",\"kind\":\"place\",\"w\":[" << x << "," << y << "," << z << "],\"type\":\"PLANKS\"}";
+            netClient.send(msg.str());
+            std::cout << "[GAME] Sent place edit: " << x << "," << y << "," << z << std::endl;
+        }
+
+        // Apply optimistically
         block->isSolid = true;
         block->type = BLOCK_PLANKS;
 
         int cx = x / CHUNK_SIZE;
         int cy = y / CHUNK_HEIGHT;
         int cz = z / CHUNK_SIZE;
+        std::cout << "[GAME] placeBlock optimistic update at (" << x << "," << y << "," << z << ") chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
         world.markChunkDirty(cx, cy, cz);
     }
 
@@ -937,6 +1090,340 @@ private:
         glDisable(GL_POLYGON_OFFSET_FILL);
         
         if (hasHighlightedBlock) renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
+        
+        // Render UI overlay
+        renderUI();
+    }
+    
+    void renderUI() {
+        // Disable depth testing for 2D UI
+        glDisable(GL_DEPTH_TEST);
+        
+        // Update text renderer projection if window size changed
+        int width, height;
+        emscripten_get_canvas_element_size("canvas", &width, &height);
+        if (width != textRenderer.getScreenWidth() || height != textRenderer.getScreenHeight()) {
+            textRenderer.updateProjection(width, height);
+        }
+        
+        // Handle different game states
+        if (gameState == GameState::LOADING || gameState == GameState::CONNECTING || gameState == GameState::WAITING_FOR_WORLD) {
+            // Full screen black background for loading
+            textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 1.0f);
+            
+            // Show loading status in center
+            float centerY = height / 2.0f - 30.0f;
+            textRenderer.drawTextCentered(loadingStatus, centerY, 3.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+            
+            // Show additional info based on state
+            if (gameState == GameState::CONNECTING) {
+                textRenderer.drawTextCentered("Establishing connection...", centerY + 50.0f, 2.0f, 0.7f, 0.7f, 0.7f, 0.8f);
+            } else if (gameState == GameState::WAITING_FOR_WORLD) {
+                std::string chunksInfo = std::to_string(chunksLoaded) + " chunks loaded";
+                textRenderer.drawTextCentered(chunksInfo, centerY + 50.0f, 2.0f, 0.7f, 0.7f, 0.7f, 0.8f);
+            }
+        } else if (gameState == GameState::DISCONNECTED) {
+            // Full screen black background for disconnect
+            textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 1.0f);
+            
+            // Show disconnect message
+            float centerY = height / 2.0f - 60.0f;
+            textRenderer.drawTextCentered("DISCONNECTED", centerY, 4.0f, 1.0f, 0.3f, 0.3f, 1.0f);
+            
+            // Show reason/instructions
+            textRenderer.drawTextCentered("Connection to server lost", centerY + 70.0f, 2.0f, 0.8f, 0.8f, 0.8f, 0.9f);
+            textRenderer.drawTextCentered("Please refresh the page to reconnect", centerY + 110.0f, 2.0f, 0.6f, 0.6f, 0.6f, 0.8f);
+        } else if (gameState == GameState::PLAYING) {
+            // Normal gameplay UI
+            
+            // Render connection status in top-left corner (only in online mode)
+            if (isOnlineMode && gameState == GameState::PLAYING) {
+                std::string statusText;
+                float r = 1.0f, g = 1.0f, b = 1.0f;
+                
+                if (netClient.isConnected()) {
+                    statusText = "CONNECTED";
+                    r = 0.3f; g = 1.0f; b = 0.3f; // Green
+                } else {
+                    statusText = "DISCONNECTED";
+                    r = 1.0f; g = 0.3f; b = 0.3f; // Red
+                }
+                
+                textRenderer.drawText(statusText, 10.0f, 10.0f, 2.0f, r, g, b, 0.9f);
+            }
+            
+            // Render pause overlay when not pointer locked
+            if (!pointerLocked) {
+                // Darken the screen
+                textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 0.5f);
+                
+                // Display "PAUSED" in center
+                float centerY = height / 2.0f - 30.0f;
+                textRenderer.drawTextCentered("PAUSED", centerY, 5.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+                
+                // Display instructions
+                float instructionY = centerY + 60.0f;
+                textRenderer.drawTextCentered("Click to resume", instructionY, 2.0f, 0.8f, 0.8f, 0.8f, 0.9f);
+            }
+        }
+        
+        // Restore OpenGL state for 3D rendering
+        glEnable(GL_DEPTH_TEST);
+        
+        // Restore the main shader and block texture atlas
+        shader->use();
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textureAtlas);
+    }
+
+    // Network methods
+    void sendHelloMessage() {
+        std::ostringstream json;
+        json << "{\"op\":\"" << ClientOp::HELLO << "\",\"proto\":" << PROTOCOL_VERSION << "}";
+        netClient.send(json.str());
+    }
+    
+    void sendInterestMessage(int centerX, int centerZ) {
+        std::ostringstream json;
+        json << "{\"op\":\"" << ClientOp::SET_INTEREST 
+             << "\",\"center\":[" << centerX << "," << centerZ 
+             << "],\"radius\":" << RENDER_DISTANCE << "}";
+        netClient.send(json.str());
+    }
+    
+    void sendPoseUpdate() {
+        std::ostringstream json;
+        json << "{\"op\":\"" << ClientOp::POSE 
+             << "\",\"x\":" << player.x 
+             << ",\"y\":" << player.y
+             << ",\"z\":" << player.z << "}";
+        netClient.send(json.str());
+    }
+    
+    void handleServerMessage(const std::string& message) {
+        // Simple JSON parsing - look for "op" field
+        size_t opPos = message.find("\"op\":");
+        if (opPos == std::string::npos) {
+            std::cerr << "[GAME] Invalid message: no op field" << std::endl;
+            return;
+        }
+        
+        // Extract op value (very simple parser)
+        size_t opStart = message.find("\"", opPos + 5);
+        size_t opEnd = message.find("\"", opStart + 1);
+        if (opStart == std::string::npos || opEnd == std::string::npos) {
+            std::cerr << "[GAME] Invalid message: malformed op" << std::endl;
+            return;
+        }
+        
+        std::string op = message.substr(opStart + 1, opEnd - opStart - 1);
+        std::cout << "[GAME] Handling message op: " << op << std::endl;
+        
+        if (op == ServerOp::HELLO_OK) {
+            handleHelloOk(message);
+        } else if (op == ServerOp::CHUNK_FULL) {
+            handleChunkFull(message);
+        } else if (op == ServerOp::CHUNK_UNLOAD) {
+            handleChunkUnload(message);
+        } else if (op == ServerOp::PLAYER_SNAPSHOT) {
+            handlePlayerSnapshot(message);
+        } else if (op == ServerOp::BLOCK_UPDATE) {
+            handleBlockUpdate(message);
+        } else {
+            std::cerr << "[GAME] Unknown op: " << op << std::endl;
+        }
+    }
+    
+    void handleHelloOk(const std::string& message) {
+        std::cout << "[GAME] ✓ Server accepted hello" << std::endl;
+    }
+    
+    void handleChunkFull(const std::string& message) {
+        // Parse: {"op":"chunk_full","cx":32,"cy":1,"cz":36,"rev":0,"data":"base64..."}
+        size_t cxPos = message.find("\"cx\":");
+        size_t cyPos = message.find("\"cy\":");
+        size_t czPos = message.find("\"cz\":");
+        size_t dataPos = message.find("\"data\":\"");
+        
+        if (cxPos == std::string::npos || cyPos == std::string::npos || 
+            czPos == std::string::npos || dataPos == std::string::npos) {
+            std::cerr << "[GAME] Invalid chunk_full message format" << std::endl;
+            return;
+        }
+        
+        // Extract coordinates
+        int cx = std::stoi(message.substr(message.find(":", cxPos) + 1));
+        int cy = std::stoi(message.substr(message.find(":", cyPos) + 1));
+        int cz = std::stoi(message.substr(message.find(":", czPos) + 1));
+        
+        // Extract base64 data
+        size_t dataStart = dataPos + 8; // Skip past "data":"
+        size_t dataEnd = message.find("\"", dataStart);
+        if (dataEnd == std::string::npos) {
+            std::cerr << "[GAME] Invalid chunk_full data field" << std::endl;
+            return;
+        }
+        std::string base64Data = message.substr(dataStart, dataEnd - dataStart);
+        
+        // Decode base64 -> RLE bytes
+        std::vector<uint8_t> encoded = Serialization::base64_decode(base64Data);
+        
+        // Decode RLE -> block arrays
+        const int totalBlocks = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE;
+        std::vector<uint8_t> types(totalBlocks);
+        std::vector<uint8_t> solids(totalBlocks);
+        Serialization::decodeChunk(encoded, types.data(), solids.data());
+        
+        // Convert uint8_t to BlockType and bool for setChunkData
+        BlockType* blockTypes = new BlockType[totalBlocks];
+        bool* blockSolids = new bool[totalBlocks];
+        for (int i = 0; i < totalBlocks; ++i) {
+            blockTypes[i] = static_cast<BlockType>(types[i]);
+            blockSolids[i] = (solids[i] != 0);
+        }
+        
+        // Apply to world
+        world.setChunkData(cx, cy, cz, blockTypes, blockSolids);
+        
+        // Clean up
+        delete[] blockTypes;
+        delete[] blockSolids;
+        
+        // Generate mesh
+        meshManager.generateChunkMesh(world, cx, cy, cz);
+        
+        // Track chunk loading progress
+        chunksLoaded++;
+        if (!hasReceivedFirstChunk) {
+            hasReceivedFirstChunk = true;
+            std::cout << "[GAME] ✓ Received first chunk, starting gameplay..." << std::endl;
+        }
+        
+        // Update loading status
+        if (gameState == GameState::WAITING_FOR_WORLD) {
+            loadingStatus = "Loading world... (" + std::to_string(chunksLoaded) + " chunks)";
+            
+            // Transition to PLAYING after we have some chunks
+            if (chunksLoaded >= 5) {
+                gameState = GameState::PLAYING;
+                loadingStatus = "Ready!";
+                std::cout << "[GAME] ✓ Enough chunks loaded, entering gameplay" << std::endl;
+            }
+        }
+        
+        std::cout << "[GAME] ✓ Loaded chunk (" << cx << "," << cy << "," << cz << ") from server" << std::endl;
+    }
+    
+    void handleChunkUnload(const std::string& message) {
+        // Parse: {"op":"chunk_unload","cx":0,"cy":0,"cz":0}
+        size_t cxPos = message.find("\"cx\":");
+        size_t cyPos = message.find("\"cy\":");
+        size_t czPos = message.find("\"cz\":");
+        
+        if (cxPos == std::string::npos || cyPos == std::string::npos || czPos == std::string::npos) {
+            std::cerr << "[GAME] Invalid chunk_unload message" << std::endl;
+            return;
+        }
+        
+        int cx = std::stoi(message.substr(message.find(":", cxPos) + 1));
+        int cy = std::stoi(message.substr(message.find(":", cyPos) + 1));
+        int cz = std::stoi(message.substr(message.find(":", czPos) + 1));
+        
+        std::cout << "[GAME] Unloading chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
+        
+        // Free chunk data and mesh
+        world.eraseChunk(cx, cy, cz);
+        meshManager.removeChunkMesh(cx, cy, cz);
+        
+        // Remove revision tracking
+        ChunkCoord coord{cx, cy, cz};
+        chunkRevisions.erase(coord);
+    }
+    
+    void handleBlockUpdate(const std::string& message) {
+        // Parse: {"op":"block_update","w":[x,y,z],"type":1,"solid":true,"cx":0,"cy":0,"cz":0,"rev":5}
+        size_t wPos = message.find("\"w\":");
+        size_t typePos = message.find("\"type\":");
+        size_t solidPos = message.find("\"solid\":");
+        size_t cxPos = message.find("\"cx\":");
+        size_t revPos = message.find("\"rev\":");
+        
+        if (wPos == std::string::npos || typePos == std::string::npos || solidPos == std::string::npos) {
+            std::cerr << "[GAME] Invalid block_update message" << std::endl;
+            return;
+        }
+        
+        // Extract world coordinates
+        size_t wArrayStart = message.find("[", wPos);
+        size_t wArrayEnd = message.find("]", wArrayStart);
+        std::string wArray = message.substr(wArrayStart + 1, wArrayEnd - wArrayStart - 1);
+        
+        int wx, wy, wz;
+        if (sscanf(wArray.c_str(), "%d,%d,%d", &wx, &wy, &wz) != 3) {
+            std::cerr << "[GAME] Invalid coordinates in block_update" << std::endl;
+            return;
+        }
+        
+        // Extract type
+        size_t typeValStart = message.find(":", typePos) + 1;
+        size_t typeValEnd = message.find_first_of(",}", typeValStart);
+        int blockType = std::stoi(message.substr(typeValStart, typeValEnd - typeValStart));
+        
+        // Extract solid
+        size_t solidValStart = message.find(":", solidPos) + 1;
+        size_t solidValEnd = message.find_first_of(",}", solidValStart);
+        std::string solidStr = message.substr(solidValStart, solidValEnd - solidValStart);
+        bool isSolid = (solidStr.find("true") != std::string::npos);
+        
+        // Extract chunk coordinates
+        int cx, cy, cz;
+        if (cxPos != std::string::npos) {
+            size_t cyPos = message.find("\"cy\":");
+            size_t czPos = message.find("\"cz\":");
+            cx = std::stoi(message.substr(message.find(":", cxPos) + 1));
+            cy = std::stoi(message.substr(message.find(":", cyPos) + 1));
+            cz = std::stoi(message.substr(message.find(":", czPos) + 1));
+        } else {
+            cx = wx / CHUNK_SIZE;
+            cy = wy / CHUNK_HEIGHT;
+            cz = wz / CHUNK_SIZE;
+        }
+        
+        // Extract revision if present
+        int rev = 0;
+        if (revPos != std::string::npos) {
+            size_t revValStart = message.find(":", revPos) + 1;
+            size_t revValEnd = message.find_first_of(",}", revValStart);
+            rev = std::stoi(message.substr(revValStart, revValEnd - revValStart));
+        }
+        
+        // Check revision - only apply if newer or first time
+        ChunkCoord coord{cx, cy, cz};
+        if (chunkRevisions.count(coord) > 0 && chunkRevisions[coord] >= rev) {
+            std::cout << "[GAME] Ignoring stale block_update (rev " << rev << " <= " << chunkRevisions[coord] << ")" << std::endl;
+            return;
+        }
+        chunkRevisions[coord] = rev;
+        
+        // Apply update
+        Block* block = world.getBlockAt(wx, wy, wz);
+        if (!block) {
+            std::cerr << "[GAME] Block not in loaded chunk" << std::endl;
+            return;
+        }
+        
+        block->type = static_cast<BlockType>(blockType);
+        block->isSolid = isSolid;
+        world.markChunkDirty(cx, cy, cz);
+        
+        std::cout << "[GAME] Applied block_update: (" << wx << "," << wy << "," << wz 
+                  << ") type=" << blockType << " solid=" << isSolid << " rev=" << rev << std::endl;
+    }
+    
+    void handlePlayerSnapshot(const std::string& message) {
+        std::cout << "[GAME] → Received player_snapshot (stub: future multiplayer)" << std::endl;
+        // TODO: Parse other player positions for future multiplayer
+        // Example: {"op":"player_snapshot","players":[{"id":"p1","x":10,"y":20,"z":30},...]}
     }
 
     mat4 perspective(float fov, float aspect, float near, float far) const {

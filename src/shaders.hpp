@@ -3,6 +3,12 @@
 #ifndef SHADERS_HPP
 #define SHADERS_HPP
 
+#ifdef __EMSCRIPTEN__
+#include <GLES3/gl3.h>
+#endif
+
+#include <iostream>
+
 class Shader {
 public:
     GLuint program;

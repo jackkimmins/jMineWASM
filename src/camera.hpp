@@ -3,6 +3,14 @@
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
 
+#include <cmath>
+#include "../shared/config.hpp"
+#include "../shared/types.hpp"
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 class Camera {
 public:
     float yaw = -90.0f, pitch = 0.0f;

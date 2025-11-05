@@ -3,6 +3,16 @@
 #define MESH_HPP
 
 #include <unordered_map>
+#include <vector>
+#include <memory>
+
+#ifdef __EMSCRIPTEN__
+#include <GLES3/gl3.h>
+#endif
+
+#include "../shared/config.hpp"
+#include "../shared/types.hpp"
+#include "../shared/chunk.hpp"
 
 class ChunkMesh {
 public:
@@ -142,10 +152,9 @@ public:
                         int nz = cz * CHUNK_SIZE + z;
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
-                            if (!neighbor || (!neighbor->isSolid || neighbor->type == BLOCK_WATER)) {
-                                if (!neighbor || neighbor->type != BLOCK_WATER) {
-                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_RIGHT, block.type, world, isWater, isFoliage);
-                                }
+                            // Only render water face if neighbor exists and is not water
+                            if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_RIGHT, block.type, world, isWater, isFoliage);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
@@ -160,10 +169,9 @@ public:
                         int nz = cz * CHUNK_SIZE + z;
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
-                            if (!neighbor || (!neighbor->isSolid || neighbor->type == BLOCK_WATER)) {
-                                if (!neighbor || neighbor->type != BLOCK_WATER) {
-                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_LEFT, block.type, world, isWater, isFoliage);
-                                }
+                            // Only render water face if neighbor exists and is not water
+                            if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_LEFT, block.type, world, isWater, isFoliage);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
@@ -178,10 +186,9 @@ public:
                         int nz = cz * CHUNK_SIZE + z;
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
-                            if (!neighbor || (!neighbor->isSolid || neighbor->type == BLOCK_WATER)) {
-                                if (!neighbor || neighbor->type != BLOCK_WATER) {
-                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_TOP, block.type, world, isWater, isFoliage);
-                                }
+                            // Only render water face if neighbor exists and is not water
+                            if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_TOP, block.type, world, isWater, isFoliage);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
@@ -198,10 +205,9 @@ public:
                         bool isBottomFaceBedrock = (block.type == BLOCK_BEDROCK && y == 0);
                         if (!isBottomFaceBedrock) {
                             if (isWater) {
-                                if (!neighbor || (!neighbor->isSolid || neighbor->type == BLOCK_WATER)) {
-                                    if (!neighbor || neighbor->type != BLOCK_WATER) {
-                                        addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BOTTOM, block.type, world, isWater, isFoliage);
-                                    }
+                                // Only render water face if neighbor exists and is not water
+                                if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
+                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BOTTOM, block.type, world, isWater, isFoliage);
                                 }
                             } else {
                                 if (shouldRenderFaceAgainst(neighbor, block.type)) {
@@ -217,10 +223,9 @@ public:
                         int nz = cz * CHUNK_SIZE + z + 1;
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
-                            if (!neighbor || (!neighbor->isSolid || neighbor->type == BLOCK_WATER)) {
-                                if (!neighbor || neighbor->type != BLOCK_WATER) {
-                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_FRONT, block.type, world, isWater, isFoliage);
-                                }
+                            // Only render water face if neighbor exists and is not water
+                            if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_FRONT, block.type, world, isWater, isFoliage);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
@@ -235,10 +240,9 @@ public:
                         int nz = cz * CHUNK_SIZE + z - 1;
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
-                            if (!neighbor || (!neighbor->isSolid || neighbor->type == BLOCK_WATER)) {
-                                if (!neighbor || neighbor->type != BLOCK_WATER) {
-                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BACK, block.type, world, isWater, isFoliage);
-                                }
+                            // Only render water face if neighbor exists and is not water
+                            if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BACK, block.type, world, isWater, isFoliage);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
@@ -254,12 +258,31 @@ public:
     }
     
     void updateDirtyChunks(World& world) {
+        static int callCount = 0;
+        callCount++;
+        if (callCount % 60 == 0) {  // Log every 60 calls (roughly once per second at 60fps)
+            std::cout << "[MESH] updateDirtyChunks called (call #" << callCount << "), checking " << world.getLoadedChunks().size() << " loaded chunks" << std::endl;
+        }
+        
+        int dirtyCount = 0;
+        int checkedCount = 0;
         for (const auto& coord : world.getLoadedChunks()) {
-            auto it = world.getChunks().find(coord);
-            if (it != world.getChunks().end() && it->second->isDirty) {
-                generateChunkMesh(world, coord.x, coord.y, coord.z);
-                it->second->isDirty = false;
+            checkedCount++;
+            Chunk* chunk = world.getChunk(coord.x, coord.y, coord.z);
+            if (chunk) {
+                if (chunk->isDirty) {
+                    dirtyCount++;
+                    std::cout << "[MESH] Regenerating mesh for dirty chunk (" << coord.x << "," << coord.y << "," << coord.z << ")" << std::endl;
+                    generateChunkMesh(world, coord.x, coord.y, coord.z);
+                    chunk->isDirty = false;
+                    std::cout << "[MESH] Mesh regeneration complete for chunk (" << coord.x << "," << coord.y << "," << coord.z << ")" << std::endl;
+                }
+            } else {
+                std::cout << "[MESH] WARNING: Could not get chunk (" << coord.x << "," << coord.y << "," << coord.z << ") for dirty check" << std::endl;
             }
+        }
+        if (dirtyCount > 0) {
+            std::cout << "[MESH] Updated " << dirtyCount << " dirty chunks out of " << checkedCount << " loaded chunks" << std::endl;
         }
     }
     

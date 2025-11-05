@@ -27,30 +27,15 @@
             width: 100%;
             height: 100%;
             cursor: none;
-            transition: opacity 0.3s ease;
-        }
-
-        #statusText {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            font-size: 3rem;
-            pointer-events: none;
-            display: block;
-			font-family: Arial, sans-serif;
         }
     </style>
 </head>
 
 <body>
     <canvas id="canvas"></canvas>
-    <div id="statusText">PAUSED</div>
 	<script>
 		let pointerLocked = false;
 		const canvas = document.getElementById('canvas');
-		const statusText = document.getElementById('statusText');
 
 		canvas.width = 1920;
 		canvas.height = 1080;
@@ -68,14 +53,7 @@
 				document.mozPointerLockElement === canvas ||
 				document.webkitPointerLockElement === canvas);
 			canvas.style.cursor = pointerLocked ? 'none' : 'default';
-			statusText.style.display = pointerLocked ? 'none' : 'block';
-			canvas.style.opacity = pointerLocked ? '1' : '0.5';
 			Module.ccall('setPointerLocked', 'void', ['bool'], [pointerLocked]);
-		}
-
-		if (!pointerLocked) {
-			canvas.style.opacity = '0.5';
-			statusText.style.display = 'block';
 		}
 
 		document.addEventListener('keydown', function(e) {
@@ -98,6 +76,14 @@
 				canvas.requestPointerLock();
 			}
 		});
+
+		// Set WebSocket URL for multiplayer
+		// Change this to your server's WebSocket endpoint
+		Module = {
+			preRun: [function() {
+				ENV.GAME_WS_URL = "ws://10.0.10.15:8888/ws";
+			}]
+		};
 	</script>
     <script src="index.js"></script>
     {{{ SCRIPT }}}
