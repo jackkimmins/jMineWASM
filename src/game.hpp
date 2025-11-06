@@ -6,7 +6,10 @@
 #include "../shared/protocol.hpp"
 #include "../shared/serialization.hpp"
 #include "text_renderer.hpp"
+#include "player_model.hpp"
 #include <sstream>
+#include <unordered_map>
+#include <string>
 
 enum class GameState {
     LOADING,           // Initial loading
@@ -14,6 +17,20 @@ enum class GameState {
     WAITING_FOR_WORLD, // Waiting for world data from server
     PLAYING,           // Normal gameplay
     DISCONNECTED       // Disconnected from server
+};
+
+// Structure to track remote players
+struct RemotePlayer {
+    std::string id;
+    float x, y, z;
+    float yaw, pitch;
+    std::chrono::steady_clock::time_point lastUpdate;
+    
+    RemotePlayer() : x(0), y(0), z(0), yaw(0), pitch(0) {}
+    
+    RemotePlayer(const std::string& playerId, float px, float py, float pz, float pyaw = 0, float ppitch = 0) 
+        : id(playerId), x(px), y(py), z(pz), yaw(pyaw), pitch(ppitch), 
+          lastUpdate(std::chrono::steady_clock::now()) {}
 };
 
 class Game {
@@ -48,9 +65,17 @@ public:
     int lastPlayerChunkZ = -999;
     Vector3 lastSafePos { SPAWN_X, SPAWN_Y + 1.6f, SPAWN_Z };
     
+    // Player model rendering
+    PlayerModel* playerModel = nullptr;
+    Shader* playerShader = nullptr;
+    GLuint playerSkinTexture = 0;
+    GLint playerMvpLoc;
+    std::unordered_map<std::string, RemotePlayer> remotePlayers;
+    
     // Network client
     NetworkClient netClient;
     bool isOnlineMode = false;
+    std::string myClientId = "";  // Our client ID from server
     int lastInterestChunkX = -9999;
     int lastInterestChunkZ = -9999;
     std::unordered_map<ChunkCoord, int> chunkRevisions; // Track revisions for reconciliation
@@ -217,6 +242,54 @@ public:
         // Setup outline VAO and VBO
         glGenVertexArrays(1, &outlineVAO);
         glGenBuffers(1, &outlineVBO);
+
+        // Create player model shader
+        const char* playerVertexSrc = R"(#version 300 es
+            precision mediump float;
+            layout(location = 0) in vec3 aPos;
+            layout(location = 1) in vec2 aTexCoord;
+            uniform mat4 uMVP;
+            out vec2 TexCoord;
+            void main() {
+                gl_Position = uMVP * vec4(aPos, 1.0);
+                TexCoord = aTexCoord;
+            })";
+
+        const char* playerFragmentSrc = R"(#version 300 es
+            precision mediump float;
+            in vec2 TexCoord;
+            uniform sampler2D uSkinTexture;
+            out vec4 FragColor;
+            void main() {
+                vec4 texColor = texture(uSkinTexture, TexCoord);
+                if (texColor.a < 0.1) discard;
+                FragColor = texColor;
+            })";
+
+        playerShader = new Shader(playerVertexSrc, playerFragmentSrc);
+        playerMvpLoc = playerShader->getUniform("uMVP");
+
+        // Load player skin texture
+        glGenTextures(1, &playerSkinTexture);
+        glBindTexture(GL_TEXTURE_2D, playerSkinTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        unsigned char* skinData = stbi_load("/assets/skin.png", &width, &height, &nrChannels, 4);
+        if (!skinData) {
+            std::cerr << "Failed to load player skin: assets/skin.png" << std::endl;
+        } else {
+            std::cout << "Loaded player skin: " << width << "x" << height << std::endl;
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, skinData);
+            glGenerateMipmap(GL_TEXTURE_2D);
+            stbi_image_free(skinData);
+        }
+
+        // Create player model
+        playerModel = new PlayerModel();
+        std::cout << "Player model initialized" << std::endl;
 
         // Initialise and generate the world
         loadingStatus = "Initializing world...";
@@ -1091,8 +1164,70 @@ private:
         
         if (hasHighlightedBlock) renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
         
+        // Render remote players
+        if (isOnlineMode) {
+            renderRemotePlayers(view);
+        }
+        
         // Render UI overlay
         renderUI();
+    }
+    
+    void renderRemotePlayers(const mat4& view) {
+        if (remotePlayers.empty() || !playerModel || !playerShader) {
+            return;
+        }
+        
+        // Use player shader
+        playerShader->use();
+        
+        // Bind player skin texture
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, playerSkinTexture);
+        GLint skinLoc = playerShader->getUniform("uSkinTexture");
+        glUniform1i(skinLoc, 0);
+        
+        // Enable culling for player models
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        
+        // Render each remote player
+        for (const auto& entry : remotePlayers) {
+            const RemotePlayer& rp = entry.second;
+            
+            // Debug: log player position once every few seconds
+            static float lastLogTime = 0.0f;
+            if (gameTime - lastLogTime > 3.0f) {
+                std::cout << "[RENDER] Remote player " << rp.id 
+                          << " at (" << rp.x << ", " << rp.y << ", " << rp.z << ")"
+                          << " yaw=" << rp.yaw << std::endl;
+                std::cout << "[RENDER] My position: (" << player.x << ", " << player.y << ", " << player.z << ")" << std::endl;
+                float dx = rp.x - player.x;
+                float dy = rp.y - player.y;
+                float dz = rp.z - player.z;
+                float distance = sqrtf(dx*dx + dy*dy + dz*dz);
+                std::cout << "[RENDER] Distance to player: " << distance << " blocks" << std::endl;
+                lastLogTime = gameTime;
+            }
+            
+            // Create model matrix for this player (y is at feet)
+            mat4 model = createPlayerModelMatrix(rp.x, rp.y, rp.z, rp.yaw);
+            mat4 mvp = multiply(projection, multiply(view, model));
+            
+            // Set MVP uniform
+            glUniformMatrix4fv(playerMvpLoc, 1, GL_FALSE, mvp.data);
+            
+            // Draw player model
+            playerModel->draw();
+        }
+        
+        // Restore state
+        glDisable(GL_CULL_FACE);
+        
+        // Restore main shader and texture
+        shader->use();
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textureAtlas);
     }
     
     void renderUI() {
@@ -1196,7 +1331,9 @@ private:
         json << "{\"op\":\"" << ClientOp::POSE 
              << "\",\"x\":" << player.x 
              << ",\"y\":" << player.y
-             << ",\"z\":" << player.z << "}";
+             << ",\"z\":" << player.z
+             << ",\"yaw\":" << camera.yaw
+             << ",\"pitch\":" << camera.pitch << "}";
         netClient.send(json.str());
     }
     
@@ -1235,7 +1372,18 @@ private:
     }
     
     void handleHelloOk(const std::string& message) {
-        std::cout << "[GAME] ✓ Server accepted hello" << std::endl;
+        // Parse: {"op":"hello_ok","client_id":"client1",...}
+        size_t clientIdPos = message.find("\"client_id\":\"");
+        if (clientIdPos != std::string::npos) {
+            size_t idStart = clientIdPos + 13;  // Length of "client_id":""
+            size_t idEnd = message.find("\"", idStart);
+            if (idEnd != std::string::npos) {
+                myClientId = message.substr(idStart, idEnd - idStart);
+                std::cout << "[GAME] ✓ Server accepted hello (my ID: " << myClientId << ")" << std::endl;
+            }
+        } else {
+            std::cout << "[GAME] ✓ Server accepted hello" << std::endl;
+        }
     }
     
     void handleChunkFull(const std::string& message) {
@@ -1421,9 +1569,96 @@ private:
     }
     
     void handlePlayerSnapshot(const std::string& message) {
-        std::cout << "[GAME] → Received player_snapshot (stub: future multiplayer)" << std::endl;
-        // TODO: Parse other player positions for future multiplayer
-        // Example: {"op":"player_snapshot","players":[{"id":"p1","x":10,"y":20,"z":30},...]}
+        // Parse: {"op":"player_snapshot","players":[{"id":"client1","x":10,"y":20,"z":30,"yaw":45,"pitch":10},...]}
+        size_t playersPos = message.find("\"players\":");
+        if (playersPos == std::string::npos) {
+            return;
+        }
+        
+        // Clear old players that haven't been updated (keep timeout simple for now)
+        auto now = std::chrono::steady_clock::now();
+        for (auto it = remotePlayers.begin(); it != remotePlayers.end(); ) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.lastUpdate);
+            if (elapsed.count() > 5) {  // Remove players not seen for 5 seconds
+                std::cout << "[GAME] Removing stale player: " << it->first << std::endl;
+                it = remotePlayers.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        
+        // Simple parser for player array
+        size_t arrayStart = message.find("[", playersPos);
+        size_t arrayEnd = message.find("]", arrayStart);
+        if (arrayStart == std::string::npos || arrayEnd == std::string::npos) {
+            return;
+        }
+        
+        // Extract each player object
+        size_t pos = arrayStart + 1;
+        while (pos < arrayEnd) {
+            size_t objStart = message.find("{", pos);
+            if (objStart == std::string::npos || objStart > arrayEnd) break;
+            
+            size_t objEnd = message.find("}", objStart);
+            if (objEnd == std::string::npos || objEnd > arrayEnd) break;
+            
+            std::string playerObj = message.substr(objStart, objEnd - objStart + 1);
+            
+            // Parse player fields
+            size_t idPos = playerObj.find("\"id\":\"");
+            size_t xPos = playerObj.find("\"x\":");
+            size_t yPos = playerObj.find("\"y\":");
+            size_t zPos = playerObj.find("\"z\":");
+            size_t yawPos = playerObj.find("\"yaw\":");
+            size_t pitchPos = playerObj.find("\"pitch\":");
+            
+            if (idPos != std::string::npos && xPos != std::string::npos && 
+                yPos != std::string::npos && zPos != std::string::npos) {
+                
+                // Extract ID
+                size_t idStart = idPos + 6;
+                size_t idEnd = playerObj.find("\"", idStart);
+                std::string playerId = playerObj.substr(idStart, idEnd - idStart);
+                
+                // Extract coordinates
+                float x = std::stof(playerObj.substr(playerObj.find(":", xPos) + 1));
+                float y = std::stof(playerObj.substr(playerObj.find(":", yPos) + 1));
+                float z = std::stof(playerObj.substr(playerObj.find(":", zPos) + 1));
+                
+                // Extract rotation (with defaults if not present)
+                float yaw = 0.0f;
+                float pitch = 0.0f;
+                if (yawPos != std::string::npos) {
+                    yaw = std::stof(playerObj.substr(playerObj.find(":", yawPos) + 1));
+                }
+                if (pitchPos != std::string::npos) {
+                    pitch = std::stof(playerObj.substr(playerObj.find(":", pitchPos) + 1));
+                }
+                
+                // Skip ourselves (safety check - server should already exclude us)
+                if (!myClientId.empty() && playerId == myClientId) {
+                    continue;
+                }
+                
+                // Update or create remote player
+                if (remotePlayers.count(playerId) > 0) {
+                    remotePlayers[playerId].x = x;
+                    remotePlayers[playerId].y = y;
+                    remotePlayers[playerId].z = z;
+                    remotePlayers[playerId].yaw = yaw;
+                    remotePlayers[playerId].pitch = pitch;
+                    remotePlayers[playerId].lastUpdate = now;
+                } else {
+                    std::cout << "[GAME] New player connected: " << playerId << std::endl;
+                    remotePlayers[playerId] = RemotePlayer(playerId, x, y, z, yaw, pitch);
+                }
+            }
+            
+            pos = objEnd + 1;
+        }
+        
+        std::cout << "[GAME] Player snapshot: " << remotePlayers.size() << " remote players" << std::endl;
     }
 
     mat4 perspective(float fov, float aspect, float near, float far) const {

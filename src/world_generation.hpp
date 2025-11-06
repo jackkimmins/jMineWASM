@@ -1025,11 +1025,11 @@ public:
     }
     
     void markChunkDirty(int cx, int cy, int cz) {
-        std::cout << "[WORLD] markChunkDirty called for chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
+        // std::cout << "[WORLD] markChunkDirty called for chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
         if (Chunk* chunk = getChunk(cx, cy, cz)) {
             bool wasDirty = chunk->isDirty;
             chunk->isDirty = true;
-            std::cout << "[WORLD] Marked chunk (" << cx << "," << cy << "," << cz << ") as dirty (was " << (wasDirty ? "already dirty" : "clean") << ")" << std::endl;
+            // std::cout << "[WORLD] Marked chunk (" << cx << "," << cy << "," << cz << ") as dirty (was " << (wasDirty ? "already dirty" : "clean") << ")" << std::endl;
         } else {
             std::cout << "[WORLD] WARNING: Chunk (" << cx << "," << cy << "," << cz << ") not found!" << std::endl;
         }

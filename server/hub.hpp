@@ -52,6 +52,7 @@ public:
     void addClient(std::shared_ptr<ClientSession> client);
     void removeClient(std::shared_ptr<ClientSession> client);
     void handleMessage(std::shared_ptr<ClientSession> client, const std::string& message);
+    void broadcastPlayerSnapshot();
     
     World& getWorld() { return world; }
     
@@ -126,7 +127,9 @@ public:
     
     // Rate limiting and pose tracking
     float lastPoseX = 0.0f, lastPoseY = 0.0f, lastPoseZ = 0.0f;
+    float lastYaw = 0.0f, lastPitch = 0.0f;
     std::chrono::steady_clock::time_point lastEditTime;
+    std::chrono::steady_clock::time_point lastPoseUpdate;
     int editTokens = 60; // Token bucket: 60 initial, refills at 20/sec
     
 private:

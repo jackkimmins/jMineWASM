@@ -38,21 +38,36 @@ void Hub::handleMessage(std::shared_ptr<ClientSession> client, const std::string
     }
     
     std::string op = message.substr(opStart + 1, opEnd - opStart - 1);
-    std::cout << "[HUB] Handling op: " << op << std::endl;
+    // std::cout << "[HUB] Handling op: " << op << std::endl;
     
     if (op == ClientOp::HELLO) {
         handleHello(client, message);
     } else if (op == ClientOp::SET_INTEREST) {
         handleSetInterest(client, message);
     } else if (op == ClientOp::POSE) {
-        // Parse pose: {"op":"pose","x":10.5,"y":20.0,"z":30.5}
+        // Parse pose: {"op":"pose","x":10.5,"y":20.0,"z":30.5,"yaw":45.0,"pitch":10.0}
         size_t xPos = message.find("\"x\":");
         size_t yPos = message.find("\"y\":");
         size_t zPos = message.find("\"z\":");
+        size_t yawPos = message.find("\"yaw\":");
+        size_t pitchPos = message.find("\"pitch\":");
+        
         if (xPos != std::string::npos && yPos != std::string::npos && zPos != std::string::npos) {
             client->lastPoseX = std::stof(message.substr(message.find(":", xPos) + 1));
             client->lastPoseY = std::stof(message.substr(message.find(":", yPos) + 1));
             client->lastPoseZ = std::stof(message.substr(message.find(":", zPos) + 1));
+            
+            if (yawPos != std::string::npos) {
+                client->lastYaw = std::stof(message.substr(message.find(":", yawPos) + 1));
+            }
+            if (pitchPos != std::string::npos) {
+                client->lastPitch = std::stof(message.substr(message.find(":", pitchPos) + 1));
+            }
+            
+            client->lastPoseUpdate = std::chrono::steady_clock::now();
+            
+            // Broadcast updated player positions to all clients
+            broadcastPlayerSnapshot();
         }
     } else if (op == ClientOp::EDIT) {
         handleEdit(client, message);
@@ -90,9 +105,20 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
         return;
     }
     
-    // Send hello_ok
+    // Get this client's ID
+    std::string clientId;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex);
+        auto it = clients.find(client);
+        if (it != clients.end()) {
+            clientId = it->second;
+        }
+    }
+    
+    // Send hello_ok with client ID
     std::ostringstream response;
     response << "{\"op\":\"" << ServerOp::HELLO_OK << "\""
+             << ",\"client_id\":\"" << clientId << "\""
              << ",\"server_version\":\"1.0.0\""
              << ",\"proto\":" << PROTOCOL_VERSION
              << ",\"seed\":" << PERLIN_SEED
@@ -101,7 +127,7 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
              << "}";
     
     std::string responseStr = response.str();
-    std::cout << "[HUB] → hello_ok" << std::endl;
+    std::cout << "[HUB] → hello_ok (client_id: " << clientId << ")" << std::endl;
     client->send(responseStr);
 }
 
@@ -300,9 +326,9 @@ void Hub::sendChunkFull(std::shared_ptr<ClientSession> client, int cx, int cy, i
         // Store in cache
         chunkCache[cacheKey] = base64Data;
         
-        std::cout << "[HUB] → chunk_full(" << cx << "," << cy << "," << cz 
-                  << ") [" << base64Data.length() << " chars, " << encoded.size() 
-                  << " bytes RLE, rev=" << rev << "]" << std::endl;
+        // std::cout << "[HUB] → chunk_full(" << cx << "," << cy << "," << cz 
+        //           << ") [" << base64Data.length() << " chars, " << encoded.size() 
+        //           << " bytes RLE, rev=" << rev << "]" << std::endl;
     }
     
     // Send chunk_full message
@@ -327,7 +353,7 @@ void Hub::sendChunkUnload(std::shared_ptr<ClientSession> client, int cx, int cy,
              << "}";
     
     std::string responseStr = response.str();
-    std::cout << "[HUB] → chunk_unload(" << cx << "," << cy << "," << cz << ")" << std::endl;
+    // std::cout << "[HUB] → chunk_unload(" << cx << "," << cy << "," << cz << ")" << std::endl;
     client->send(responseStr);
 }
 
@@ -687,4 +713,49 @@ void Hub::loadWorld() {
     }
     
     std::cout << "[HUB] Loaded " << loadedCount << " chunks from disk" << std::endl;
+}
+
+void Hub::broadcastPlayerSnapshot() {
+    std::lock_guard<std::mutex> lock(clientsMutex);
+    
+    if (clients.empty()) {
+        return;
+    }
+    
+    // Send personalized snapshot to each client (excluding themselves)
+    for (const auto& receiverEntry : clients) {
+        auto receiverClient = receiverEntry.first;
+        const std::string& receiverClientId = receiverEntry.second;
+        
+        // Build player snapshot message for this specific client
+        std::ostringstream json;
+        json << "{\"op\":\"" << ServerOp::PLAYER_SNAPSHOT << "\",\"players\":[";
+        
+        bool first = true;
+        for (const auto& playerEntry : clients) {
+            auto playerClient = playerEntry.first;
+            const std::string& playerClientId = playerEntry.second;
+            
+            // Skip the receiving client (don't send themselves)
+            if (playerClient == receiverClient) {
+                continue;
+            }
+            
+            if (!first) json << ",";
+            first = false;
+            
+            json << "{\"id\":\"" << playerClientId << "\""
+                 << ",\"x\":" << playerClient->lastPoseX
+                 << ",\"y\":" << playerClient->lastPoseY
+                 << ",\"z\":" << playerClient->lastPoseZ
+                 << ",\"yaw\":" << playerClient->lastYaw
+                 << ",\"pitch\":" << playerClient->lastPitch
+                 << "}";
+        }
+        
+        json << "]}";
+        
+        // Send to this specific client
+        receiverClient->send(json.str());
+    }
 }
