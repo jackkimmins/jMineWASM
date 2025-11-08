@@ -13,6 +13,82 @@ void Hub::addClient(std::shared_ptr<ClientSession> client) {
     std::cout << "[HUB] Added " << clientId << " (total: " << clients.size() << ")" << std::endl;
 }
 
+void Hub::calculateSafeSpawnPoint() {
+    const int MIN_DISTANCE_FROM_WATER = 5;
+    
+    std::cout << "[HUB] Calculating safe spawn point (min " << MIN_DISTANCE_FROM_WATER << " blocks from water)..." << std::endl;
+    
+    // Load chunks around the default spawn area
+    int spawnChunkX = static_cast<int>(SPAWN_X) / CHUNK_SIZE;
+    int spawnChunkZ = static_cast<int>(SPAWN_Z) / CHUNK_SIZE;
+    
+    // First pass: Generate base terrain and water
+    for (int dcx = -4; dcx <= 4; ++dcx) {
+        for (int dcz = -4; dcz <= 4; ++dcz) {
+            int cx = spawnChunkX + dcx;
+            int cz = spawnChunkZ + dcz;
+            
+            if (cx < 0 || cx >= WORLD_CHUNK_SIZE_X || cz < 0 || cz >= WORLD_CHUNK_SIZE_Z) continue;
+            
+            // Generate all vertical chunks in this column
+            for (int cy = 0; cy < WORLD_CHUNK_SIZE_Y; ++cy) {
+                world.generateChunk(cx, cy, cz);
+                world.generateWater(cx, cy, cz);
+            }
+        }
+    }
+    
+    // Second pass: Caves, ores, and surface updates
+    for (int dcx = -4; dcx <= 4; ++dcx) {
+        for (int dcz = -4; dcz <= 4; ++dcz) {
+            int cx = spawnChunkX + dcx;
+            int cz = spawnChunkZ + dcz;
+            
+            if (cx < 0 || cx >= WORLD_CHUNK_SIZE_X || cz < 0 || cz >= WORLD_CHUNK_SIZE_Z) continue;
+            
+            for (int cy = 0; cy < WORLD_CHUNK_SIZE_Y; ++cy) {
+                Chunk* chunk = world.getChunk(cx, cy, cz);
+                if (chunk && chunk->isGenerated && !chunk->isFullyProcessed) {
+                    world.generateCaves(cx, cy, cz);
+                    world.generateOres(cx, cy, cz);
+                    world.updateSurfaceBlocks(cx, cy, cz);
+                }
+            }
+        }
+    }
+    
+    // Third pass: Trees and foliage
+    for (int dcx = -4; dcx <= 4; ++dcx) {
+        for (int dcz = -4; dcz <= 4; ++dcz) {
+            int cx = spawnChunkX + dcx;
+            int cz = spawnChunkZ + dcz;
+            
+            if (cx < 0 || cx >= WORLD_CHUNK_SIZE_X || cz < 0 || cz >= WORLD_CHUNK_SIZE_Z) continue;
+            
+            world.generateTreesForColumn(cx, cz);
+            world.generateFoliageForColumn(cx, cz);
+            
+            // Mark all chunks in this column as fully processed
+            for (int cy = 0; cy < WORLD_CHUNK_SIZE_Y; ++cy) {
+                Chunk* chunk = world.getChunk(cx, cy, cz);
+                if (chunk) {
+                    chunk->isFullyProcessed = true;
+                }
+            }
+        }
+    }
+    
+    // Try to find a safe spawn point
+    if (world.findSafeSpawnPoint(SPAWN_X, SPAWN_Z, MIN_DISTANCE_FROM_WATER, spawnX, spawnY, spawnZ)) {
+        std::cout << "[HUB] Safe spawn point found at (" << spawnX << ", " << spawnY << ", " << spawnZ << ")" << std::endl;
+    } else {
+        std::cout << "[HUB] Warning: Could not find safe spawn point away from water, using default" << std::endl;
+        spawnX = SPAWN_X;
+        spawnY = SPAWN_Y;
+        spawnZ = SPAWN_Z;
+    }
+}
+
 void Hub::removeClient(std::shared_ptr<ClientSession> client) {
     std::lock_guard<std::mutex> lock(clientsMutex);
     auto it = clients.find(client);
@@ -124,10 +200,11 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
              << ",\"seed\":" << PERLIN_SEED
              << ",\"world_size\":[" << WORLD_SIZE_X << "," << WORLD_SIZE_Y << "," << WORLD_SIZE_Z << "]"
              << ",\"chunk_size\":[" << CHUNK_SIZE << "," << CHUNK_HEIGHT << "," << CHUNK_SIZE << "]"
+             << ",\"spawn\":[" << spawnX << "," << spawnY << "," << spawnZ << "]"
              << "}";
     
     std::string responseStr = response.str();
-    std::cout << "[HUB] → hello_ok (client_id: " << clientId << ")" << std::endl;
+    std::cout << "[HUB] → hello_ok (client_id: " << clientId << ", spawn: [" << spawnX << "," << spawnY << "," << spawnZ << "])" << std::endl;
     client->send(responseStr);
 }
 
@@ -157,7 +234,7 @@ void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::st
         radius = std::stoi(message.substr(radiusStart, radiusEnd - radiusStart));
     }
     
-    std::cout << "[HUB] Set interest: center=(" << cx << "," << cz << "), radius=" << radius << std::endl;
+    // std::cout << "[HUB] Set interest: center=(" << cx << "," << cz << "), radius=" << radius << std::endl;
     
     // Calculate new AOI
     std::unordered_set<ChunkCoord, std::hash<ChunkCoord>> newAOI;
@@ -196,7 +273,7 @@ void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::st
         }
     }
     
-    std::cout << "[HUB] AOI delta: +" << toAdd.size() << " -" << toRemove.size() << std::endl;
+    // std::cout << "[HUB] AOI delta: +" << toAdd.size() << " -" << toRemove.size() << std::endl;
     
     // Group chunks by column (cx, cz) to ensure proper generation order
     std::map<std::pair<int, int>, std::vector<int>> columnChunks; // (cx,cz) -> [cy values]
@@ -300,8 +377,8 @@ void Hub::sendChunkFull(std::shared_ptr<ClientSession> client, int cx, int cy, i
     if (chunkCache.count(cacheKey) > 0) {
         // Cache hit!
         base64Data = chunkCache[cacheKey];
-        std::cout << "[HUB] → chunk_full(" << cx << "," << cy << "," << cz 
-                  << ") [CACHED, rev=" << rev << "]" << std::endl;
+        // std::cout << "[HUB] → chunk_full(" << cx << "," << cy << "," << cz 
+        //           << ") [CACHED, rev=" << rev << "]" << std::endl;
     } else {
         // Cache miss - serialize
         const int totalBlocks = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE;
@@ -467,6 +544,38 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     
     // Set block and mark chunk dirty
     world.setBlockAndMarkDirty(wx, wy, wz, static_cast<BlockType>(newType), newSolid);
+    
+    // If we removed a block, check if there's a plant above it that should also be removed
+    if (kind == "remove") {
+        int aboveY = wy + 1;
+        if (aboveY < WORLD_SIZE_Y) {
+            const Block* aboveBlock = world.getBlockAt(wx, aboveY, wz);
+            if (aboveBlock) {
+                // Check if the block above is a plant (tall grass or flower)
+                bool isPlant = (aboveBlock->type == BLOCK_TALL_GRASS || 
+                               aboveBlock->type == BLOCK_ORANGE_FLOWER || 
+                               aboveBlock->type == BLOCK_BLUE_FLOWER);
+                
+                if (isPlant) {
+                    // Remove the plant above
+                    world.setBlockAndMarkDirty(wx, aboveY, wz, BLOCK_DIRT, false);
+                    
+                    // Increment revision for the chunk containing the plant
+                    int acx = wx / CHUNK_SIZE;
+                    int acy = aboveY / CHUNK_HEIGHT;
+                    int acz = wz / CHUNK_SIZE;
+                    ChunkCoord aboveCoord{acx, acy, acz};
+                    chunkRevisions[aboveCoord]++;
+                    
+                    // Mark chunk as modified for saving
+                    markChunkModified(acx, acy, acz);
+                    
+                    // Broadcast the plant removal to all interested clients
+                    broadcastBlockUpdate(wx, aboveY, wz, static_cast<uint8_t>(BLOCK_DIRT), false);
+                }
+            }
+        }
+    }
     
     // Increment chunk revision
     ChunkCoord coord{cx, cy, cz};

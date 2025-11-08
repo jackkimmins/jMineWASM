@@ -28,10 +28,10 @@ public:
     Player(float startX, float startY, float startZ) : x(startX), y(startY), z(startZ) {}
 };
 
-#include "perlin_noise.hpp"
+#include "../shared/perlin_noise.hpp"
 #include "shaders.hpp"
 #include "camera.hpp"
-#include "world_generation.hpp"
+#include "../shared/world_generation.hpp"
 #include "mesh.hpp"
 #include "game.hpp"
 
@@ -54,12 +54,18 @@ EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *user
 }
 
 EM_BOOL mouse_callback(int eventType, const EmscriptenMouseEvent *e, void *userData) {
-    if (eventType == EMSCRIPTEN_EVENT_MOUSEMOVE) gameInstance->handleMouseMove(static_cast<float>(e->movementX), static_cast<float>(e->movementY));
+    // Only handle mouse movement during gameplay, not in menu
+    if (eventType == EMSCRIPTEN_EVENT_MOUSEMOVE && gameInstance->gameState == GameState::PLAYING) {
+        gameInstance->handleMouseMove(static_cast<float>(e->movementX), static_cast<float>(e->movementY));
+    }
     return EM_TRUE;
 }
 
 EM_BOOL mouse_button_callback(int eventType, const EmscriptenMouseEvent *e, void *userData) {
-    if (eventType == EMSCRIPTEN_EVENT_MOUSEDOWN) gameInstance->handleMouseClick(e->button);
+    // Only handle mouse clicks during gameplay, not in menu
+    if (eventType == EMSCRIPTEN_EVENT_MOUSEDOWN && gameInstance->gameState == GameState::PLAYING) {
+        gameInstance->handleMouseClick(e->button);
+    }
     return EM_TRUE;
 }
 

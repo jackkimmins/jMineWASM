@@ -2,7 +2,7 @@
 #ifndef GAME_HPP
 #define GAME_HPP
 
-#include "../client/net.hpp"
+#include "net.hpp"
 #include "../shared/protocol.hpp"
 #include "../shared/serialization.hpp"
 #include "text_renderer.hpp"
@@ -12,6 +12,7 @@
 #include <string>
 
 enum class GameState {
+    MAIN_MENU,         // Main menu/title screen
     LOADING,           // Initial loading
     CONNECTING,        // Connecting to server (online mode)
     WAITING_FOR_WORLD, // Waiting for world data from server
@@ -36,7 +37,7 @@ struct RemotePlayer {
 class Game {
 public:
     bool pointerLocked = false;
-    GameState gameState = GameState::LOADING;
+    GameState gameState = GameState::MAIN_MENU;
     Shader* shader;
     Shader* outlineShader;
     TextRenderer textRenderer;
@@ -74,7 +75,6 @@ public:
     
     // Network client
     NetworkClient netClient;
-    bool isOnlineMode = false;
     std::string myClientId = "";  // Our client ID from server
     int lastInterestChunkX = -9999;
     int lastInterestChunkZ = -9999;
@@ -87,6 +87,25 @@ public:
     bool hasReceivedFirstChunk = false;
     int chunksLoaded = 0;
     bool wasConnected = false; // Track if we were previously connected
+    
+    // Main menu state
+    enum MenuOption {
+        MENU_PLAY_ONLINE = 0,
+        MENU_SETTINGS = 1,
+        MENU_GITHUB = 2,
+        MENU_MAX = 3
+    };
+    int selectedMenuOption = MENU_PLAY_ONLINE;
+    bool lastUpKeyState = false;
+    bool lastDownKeyState = false;
+    bool lastEnterKeyState = false;
+    float menuMouseX = 0.0f;
+    float menuMouseY = 0.0f;
+    GLuint menuBackgroundTexture = 0;
+    Shader* menuShader = nullptr;
+    GLuint menuVAO = 0, menuVBO = 0;
+    GLint menuProjLoc;
+    GLint menuTexLoc;
 
     Game() : shader(nullptr), outlineShader(nullptr), player(SPAWN_X, SPAWN_Y, SPAWN_Z) { 
         std::cout << "Game Constructed - Player Spawn: (" << SPAWN_X << ", " << SPAWN_Y << ", " << SPAWN_Z << ")" << std::endl;
@@ -291,83 +310,99 @@ public:
         playerModel = new PlayerModel();
         std::cout << "Player model initialized" << std::endl;
 
+        // Setup main menu shader and background
+        const char* menuVertexSrc = R"(#version 300 es
+            precision mediump float;
+            layout(location = 0) in vec2 aPos;
+            layout(location = 1) in vec2 aTexCoord;
+            uniform mat4 uProjection;
+            out vec2 TexCoord;
+            void main() {
+                gl_Position = uProjection * vec4(aPos, 0.0, 1.0);
+                TexCoord = aTexCoord;
+            })";
+
+        const char* menuFragmentSrc = R"(#version 300 es
+            precision mediump float;
+            in vec2 TexCoord;
+            uniform sampler2D uTexture;
+            out vec4 FragColor;
+            void main() {
+                vec4 texColor = texture(uTexture, TexCoord);
+                // Darken the texture for background effect
+                texColor.rgb *= 0.3;
+                FragColor = texColor;
+            })";
+
+        menuShader = new Shader(menuVertexSrc, menuFragmentSrc);
+        menuProjLoc = menuShader->getUniform("uProjection");
+        menuTexLoc = menuShader->getUniform("uTexture");
+
+        // Load dirt texture for menu background (reuse texture atlas)
+        // We'll just use the already loaded textureAtlas
+        menuBackgroundTexture = textureAtlas;
+
+        // Setup menu VAO/VBO for full-screen textured quad
+        glGenVertexArrays(1, &menuVAO);
+        glGenBuffers(1, &menuVBO);
+        
+        std::cout << "Main menu initialized" << std::endl;
+
         // Initialise and generate the world
         loadingStatus = "Initializing world...";
         world.initialise();
 
         // Check for network mode
         const char* wsUrl = std::getenv("GAME_WS_URL");
-        if (wsUrl && wsUrl[0] != '\0') {
-            std::cout << "[GAME] Starting in ONLINE mode" << std::endl;
-            isOnlineMode = true;
-            gameState = GameState::CONNECTING;
-            loadingStatus = "Connecting to server...";
-            
-            // Setup message handler
-            netClient.setOnMessage([this](const std::string& msg) {
-                this->handleServerMessage(msg);
-            });
-            
-            // Setup connection handler - send hello and set_interest when connected
-            netClient.setOnConnect([this]() {
-                std::cout << "[GAME] Connection established, sending hello" << std::endl;
-                loadingStatus = "Connected! Requesting world data...";
-                gameState = GameState::WAITING_FOR_WORLD;
-                wasConnected = true;
-                
-                int currentChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
-                int currentChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
-                
-                sendHelloMessage();
-                sendInterestMessage(currentChunkX, currentChunkZ);
-                
-                // Update tracking to prevent resending
-                lastPlayerChunkX = currentChunkX;
-                lastPlayerChunkZ = currentChunkZ;
-                lastInterestChunkX = currentChunkX;
-                lastInterestChunkZ = currentChunkZ;
-            });
-            
-            // Setup disconnection handler
-            netClient.setOnDisconnect([this]() {
-                std::cout << "[GAME] Disconnected from server" << std::endl;
-                gameState = GameState::DISCONNECTED;
-                loadingStatus = "Disconnected from server";
-            });
-            
-            // Connect to server
-            if (netClient.connect(wsUrl)) {
-                std::cout << "[GAME] Waiting for connection..." << std::endl;
-            } else {
-                std::cerr << "[GAME] Failed to connect, falling back to offline mode" << std::endl;
-                isOnlineMode = false;
-                gameState = GameState::LOADING;
-            }
-        } else {
-            std::cout << "[GAME] Starting in OFFLINE mode (no GAME_WS_URL set)" << std::endl;
-            isOnlineMode = false;
+        if (!wsUrl || wsUrl[0] == '\0') {
+            std::cerr << "[GAME] ERROR: This game requires a server connection." << std::endl;
+            std::cerr << "[GAME] ERROR: Please set GAME_WS_URL environment variable." << std::endl;
+            std::cerr << "[GAME] ERROR: The game is now online-only and cannot be played without a server." << std::endl;
+            loadingStatus = "Error: Server URL required (online-only game)";
+            gameState = GameState::DISCONNECTED;
+            return;
         }
+        
+        std::cout << "[GAME] Online-only mode - will connect when player starts game" << std::endl;
+        
+        // Setup message handler
+        netClient.setOnMessage([this](const std::string& msg) {
+            this->handleServerMessage(msg);
+        });
+        
+        // Setup connection handler - send hello and set_interest when connected
+        netClient.setOnConnect([this]() {
+            std::cout << "[GAME] Connection established, sending hello" << std::endl;
+            loadingStatus = "Connected! Requesting world data...";
+            gameState = GameState::WAITING_FOR_WORLD;
+            wasConnected = true;
+            
+            int currentChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
+            int currentChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
+            
+            sendHelloMessage();
+            sendInterestMessage(currentChunkX, currentChunkZ);
+            
+            // Update tracking to prevent resending
+            lastPlayerChunkX = currentChunkX;
+            lastPlayerChunkZ = currentChunkZ;
+            lastInterestChunkX = currentChunkX;
+            lastInterestChunkZ = currentChunkZ;
+        });
+        
+        // Setup disconnection handler
+        netClient.setOnDisconnect([this]() {
+            std::cout << "[GAME] Disconnected from server" << std::endl;
+            gameState = GameState::DISCONNECTED;
+            loadingStatus = "Disconnected from server";
+        });
+        
+        // Don't connect yet - wait for menu selection
+        std::cout << "[GAME] Connection will be initiated from main menu" << std::endl;
 
-        // Only load chunks locally if in offline mode
-        if (!isOnlineMode) {
-            // Load initial chunks around spawn
-            loadingStatus = "Generating terrain...";
-            std::cout << "Loading initial chunks around spawn..." << std::endl;
-            world.loadChunksAroundPosition(SPAWN_X, SPAWN_Z);
-            
-            // Generate initial chunk meshes
-            loadingStatus = "Building meshes...";
-            std::cout << "Generating initial chunk meshes..." << std::endl;
-            for (const auto& coord : world.getLoadedChunks()) {
-                meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
-                chunksLoaded++;
-            }
-            std::cout << "Loaded " << world.getLoadedChunks().size() << " chunks" << std::endl;
-            gameState = GameState::PLAYING;
-            loadingStatus = "Ready!";
-        } else {
-            std::cout << "[GAME] Skipping local chunk generation (online mode)" << std::endl;
-        }
+
+        // Don't load chunks until the player starts the game from the menu
+        std::cout << "[GAME] Skipping world generation - will load after menu" << std::endl;
 
         // Make sure that the player spawns in a good spot
         Vector3 spawnPos;
@@ -426,7 +461,7 @@ public:
             updateHighlightedBlock();
 
             // Send pose updates at 10 Hz
-            if (isOnlineMode && netClient.isConnected()) {
+            if (netClient.isConnected()) {
                 lastPoseSendTime += deltaTime;
                 if (lastPoseSendTime >= POSE_SEND_INTERVAL) {
                     sendPoseUpdate();
@@ -444,6 +479,33 @@ public:
 
     void handleKey(int keyCode, bool pressed) {
         keys[keyCode] = pressed;
+
+        // Handle main menu input
+        if (gameState == GameState::MAIN_MENU) {
+            if (keyCode == 38) { // Up arrow
+                if (pressed && !lastUpKeyState) {
+                    selectedMenuOption--;
+                    if (selectedMenuOption < 0) selectedMenuOption = MENU_MAX - 1;
+                    std::cout << "[MENU] Selected option: " << selectedMenuOption << std::endl;
+                }
+                lastUpKeyState = pressed;
+            }
+            else if (keyCode == 40) { // Down arrow
+                if (pressed && !lastDownKeyState) {
+                    selectedMenuOption++;
+                    if (selectedMenuOption >= MENU_MAX) selectedMenuOption = 0;
+                    std::cout << "[MENU] Selected option: " << selectedMenuOption << std::endl;
+                }
+                lastDownKeyState = pressed;
+            }
+            else if (keyCode == 13) { // Enter
+                if (pressed && !lastEnterKeyState) {
+                    handleMenuSelection();
+                }
+                lastEnterKeyState = pressed;
+            }
+            return; // Don't process other keys in menu
+        }
 
         // Fly mode
         if (keyCode == 32) { // Space
@@ -502,29 +564,65 @@ public:
         }
     }
 
+    void handleMenuMouseMove(float x, float y) {
+        // Store mouse position for menu rendering
+        menuMouseX = x;
+        menuMouseY = y;
+        
+        // Determine which menu option is being hovered
+        // Menu buttons are centered at y=400, 480, 560 with height 60
+        float canvasHeight = 600.0f; // Assuming standard canvas height
+        int buttonWidthPixels = 300;
+        int buttonHeightPixels = 60;
+        int buttonSpacing = 20;
+        int startY = 400;
+        
+        int canvasWidth = 800; // Assuming standard canvas width
+        int buttonX = (canvasWidth - buttonWidthPixels) / 2;
+        
+        for (int i = 0; i < MENU_MAX; i++) {
+            int buttonY = startY + i * (buttonHeightPixels + buttonSpacing);
+            if (x >= buttonX && x <= buttonX + buttonWidthPixels &&
+                y >= buttonY && y <= buttonY + buttonHeightPixels) {
+                selectedMenuOption = i;
+                return;
+            }
+        }
+    }
+
+    void handleMenuClick(float x, float y) {
+        // Check if click is on a menu button and handle selection
+        float canvasHeight = 600.0f;
+        int buttonWidthPixels = 300;
+        int buttonHeightPixels = 60;
+        int buttonSpacing = 20;
+        int startY = 400;
+        
+        int canvasWidth = 800;
+        int buttonX = (canvasWidth - buttonWidthPixels) / 2;
+        
+        for (int i = 0; i < MENU_MAX; i++) {
+            int buttonY = startY + i * (buttonHeightPixels + buttonSpacing);
+            if (x >= buttonX && x <= buttonX + buttonWidthPixels &&
+                y >= buttonY && y <= buttonY + buttonHeightPixels) {
+                selectedMenuOption = i;
+                handleMenuSelection();
+                return;
+            }
+        }
+    }
+
     void updateChunks() {
         int currentChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
         int currentChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
 
         if (currentChunkX != lastPlayerChunkX || currentChunkZ != lastPlayerChunkZ) {
-            // Send interest update if online and chunk changed
-            if (isOnlineMode && netClient.isConnected()) {
+            // Send interest update if connected and chunk changed
+            if (netClient.isConnected()) {
                 if (currentChunkX != lastInterestChunkX || currentChunkZ != lastInterestChunkZ) {
                     sendInterestMessage(currentChunkX, currentChunkZ);
                     lastInterestChunkX = currentChunkX;
                     lastInterestChunkZ = currentChunkZ;
-                }
-            }
-            
-            // Only do local generation if offline
-            if (!isOnlineMode) {
-                world.loadChunksAroundPosition(player.x, player.z);
-                world.unloadDistantChunks(player.x, player.z);
-
-                for (const auto& coord : world.getLoadedChunks()) {
-                    if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
-                        meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
-                    }
                 }
             }
 
@@ -558,6 +656,154 @@ private:
     bool isFlying = false;
     bool lastSpaceKeyState = false;
     float lastSpaceKeyPressTime = 0.0f;
+
+    void handleMenuSelection() {
+        std::cout << "[MENU] Selected: " << selectedMenuOption << std::endl;
+        
+        if (selectedMenuOption == MENU_PLAY_ONLINE) {
+            std::cout << "[MENU] Starting online game..." << std::endl;
+            
+            // Check if we can connect
+            const char* wsUrl = std::getenv("GAME_WS_URL");
+            if (!wsUrl || wsUrl[0] == '\0') {
+                std::cerr << "[MENU] No GAME_WS_URL set, cannot start online game" << std::endl;
+                loadingStatus = "Error: No server URL configured";
+                return;
+            }
+            
+            // Transition to connecting state
+            gameState = GameState::CONNECTING;
+            loadingStatus = "Connecting to server...";
+            
+            // Connect to server
+            if (netClient.connect(wsUrl)) {
+                std::cout << "[GAME] Waiting for connection..." << std::endl;
+            } else {
+                std::cerr << "[GAME] Failed to connect" << std::endl;
+                gameState = GameState::DISCONNECTED;
+                loadingStatus = "Connection failed";
+            }
+        }
+        else if (selectedMenuOption == MENU_SETTINGS) {
+            std::cout << "[MENU] Settings not yet implemented" << std::endl;
+        }
+        else if (selectedMenuOption == MENU_GITHUB) {
+            std::cout << "[MENU] Opening GitHub..." << std::endl;
+            // Open GitHub in new tab
+            EM_ASM({
+                window.open('https://github.com/jackkimmins/CubeGame2', '_blank');
+            });
+        }
+    }
+
+    void renderMainMenu(int width, int height) {
+        // Render darkened dirt texture background
+        menuShader->use();
+        
+        // Setup orthographic projection for 2D rendering
+        float projMatrix[16] = {
+            2.0f / width, 0.0f, 0.0f, 0.0f,
+            0.0f, -2.0f / height, 0.0f, 0.0f,
+            0.0f, 0.0f, -1.0f, 0.0f,
+            -1.0f, 1.0f, 0.0f, 1.0f
+        };
+        glUniformMatrix4fv(menuProjLoc, 1, GL_FALSE, projMatrix);
+        
+        // Bind texture atlas (contains dirt texture)
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, menuBackgroundTexture);
+        glUniform1i(menuTexLoc, 0);
+        
+        // Calculate dirt texture coordinates from atlas (tile 1 = dirt)
+        // Atlas is 288px wide, each tile is 16px, so dirt is at x=16 (tile index 1)
+        float atlasWidth = 288.0f;
+        float tileSize = 16.0f;
+        float tileWidth = tileSize / atlasWidth;
+        float tileHeight = 1.0f; // Single row atlas, full height
+        
+        // Dirt block is at tile index 1 (x = 16px)
+        float u0 = 1.0f * tileWidth;  // Start of dirt tile
+        float v0 = 0.0f;
+        float u1 = u0 + tileWidth;    // End of dirt tile
+        float v1 = 1.0f;
+        
+        // How many times to repeat the dirt texture across screen
+        float tilesX = width / 128.0f;  // Each dirt block appears 128px wide
+        float tilesY = height / 128.0f; // Each dirt block appears 128px tall
+        
+        // Full-screen quad with properly tiled single dirt texture
+        float vertices[] = {
+            // x, y, u, v
+            0.0f, 0.0f,           u0, v0,
+            0.0f, (float)height,  u0, v0 + tilesY * (v1 - v0),
+            (float)width, (float)height, u0 + tilesX * (u1 - u0), v0 + tilesY * (v1 - v0),
+            0.0f, 0.0f,           u0, v0,
+            (float)width, (float)height, u0 + tilesX * (u1 - u0), v0 + tilesY * (v1 - v0),
+            (float)width, 0.0f,   u0 + tilesX * (u1 - u0), v0
+        };
+        
+        glBindVertexArray(menuVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, menuVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+        
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+        
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        
+        // Draw text overlay
+        float centerX = width / 2.0f;
+        
+        // Title: jMineWASM
+        float titleY = 100.0f;
+        textRenderer.drawTextCentered("jMineWASM", titleY, 6.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        
+        // Subtitle: Online Multiplayer
+        textRenderer.drawTextCentered("Online Multiplayer Edition", titleY + 60.0f, 2.5f, 0.8f, 0.8f, 1.0f, 0.9f);
+        
+        // Menu options
+        float menuStartY = 300.0f;
+        float menuSpacing = 60.0f;
+        
+        const char* menuOptions[] = {
+            "Play (Online Only)",
+            "Settings",
+            "GitHub"
+        };
+        
+        for (int i = 0; i < MENU_MAX; i++) {
+            float optionY = menuStartY + i * menuSpacing;
+            bool isSelected = (i == selectedMenuOption);
+            
+            // Highlight selected option
+            if (isSelected) {
+                textRenderer.drawTextCentered(std::string("> ") + menuOptions[i] + " <", 
+                                             optionY, 3.5f, 1.0f, 1.0f, 0.0f, 1.0f);
+            } else {
+                textRenderer.drawTextCentered(menuOptions[i], 
+                                             optionY, 3.0f, 0.7f, 0.7f, 0.7f, 0.9f);
+            }
+        }
+        
+        // Instructions
+        float instructionsY = height - 150.0f;
+        textRenderer.drawTextCentered("Use UP/DOWN arrows to navigate", 
+                                     instructionsY, 2.0f, 0.6f, 0.6f, 0.6f, 0.8f);
+        textRenderer.drawTextCentered("Press ENTER to select", 
+                                     instructionsY + 30.0f, 2.0f, 0.6f, 0.6f, 0.6f, 0.8f);
+        
+        // Version in bottom left
+        textRenderer.drawText("jMine version 1.3", 20.0f, height - 40.0f, 2.0f, 
+                             1.0f, 1.0f, 1.0f, 0.8f);
+        
+        // Copyright in bottom right
+        std::string copyright = "(c) 2025 Jack Kimmins";
+        float copyrightWidth = copyright.length() * 8.0f * 2.0f; // Approximate width
+        textRenderer.drawText(copyright, width - copyrightWidth - 20.0f, height - 40.0f, 2.0f, 
+                             1.0f, 1.0f, 1.0f, 0.8f);
+    }
 
     float calculateDeltaTime() {
         auto now = std::chrono::steady_clock::now();
@@ -608,10 +854,8 @@ private:
         const int maxRadius = std::max(8, maxRadiusBlocks);
 
         auto tryColumn = [&](int cx, int cz, Vector3& pos) -> bool {
-            // Only load chunks if in offline mode
-            if (!isOnlineMode) {
-                world.loadChunksAroundPosition(cx + 0.5f, cz + 0.5f);
-            }
+            // In online-only mode, we query existing world data
+            // Do not attempt to generate chunks locally
 
             int h = world.getHeightAt(cx, cz);
             if (h < WATER_LEVEL) return false;
@@ -782,18 +1026,9 @@ private:
             lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
             lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
             
-            // Only generate chunks locally if in offline mode
-            if (!isOnlineMode) {
-                world.loadChunksAroundPosition(player.x, player.z);
-                world.unloadDistantChunks(player.x, player.z);
-                for (const auto& coord : world.getLoadedChunks()) {
-                    if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
-                        meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
-                    } else {
-                        meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
-                    }
-                }
-            }
+            // In online-only mode, we do NOT generate chunks locally
+            // The server will send chunk data when we reconnect
+            
             lastSafePos = { player.x, player.y, player.z };
             return;
         }
@@ -873,16 +1108,8 @@ private:
 
         isMoving = (deltaX != 0.0f || deltaZ != 0.0f) && !isFlying;
 
-        // Only do local chunk generation if in offline mode
-        if (!isOnlineMode && (deltaX != 0.0f || deltaZ != 0.0f)) {
-            world.loadChunksAroundPosition(player.x + deltaX, player.z + deltaZ);
-            world.unloadDistantChunks(player.x + deltaX, player.z + deltaZ);
-            for (const auto& coord : world.getLoadedChunks()) {
-                if (meshManager.chunkMeshes.find(coord) == meshManager.chunkMeshes.end()) {
-                    meshManager.generateChunkMesh(world, coord.x, coord.y, coord.z);
-                }
-            }
-        }
+        // In online-only mode, we do NOT generate chunks locally
+        // All chunk data comes from the server
 
         if (!isColliding(player.x + deltaX, player.y, player.z)) player.x += deltaX;
         if (!isColliding(player.x, player.y, player.z + deltaZ)) player.z += deltaZ;
@@ -902,8 +1129,8 @@ private:
         if (!block) return;
         if (block->type == BLOCK_BEDROCK) return;
 
-        // Send edit message if online
-        if (isOnlineMode && netClient.isConnected()) {
+        // Send edit message to server (online-only game)
+        if (netClient.isConnected()) {
             std::ostringstream msg;
             msg << "{\"op\":\"edit\",\"kind\":\"remove\",\"w\":[" << x << "," << y << "," << z << "]}";
             netClient.send(msg.str());
@@ -964,8 +1191,8 @@ private:
                                (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
         if (overlapsPlayer) return;
 
-        // Send edit message if online
-        if (isOnlineMode && netClient.isConnected()) {
+        // Send edit message to server (online-only game)
+        if (netClient.isConnected()) {
             std::ostringstream msg;
             msg << "{\"op\":\"edit\",\"kind\":\"place\",\"w\":[" << x << "," << y << "," << z << "],\"type\":\"PLANKS\"}";
             netClient.send(msg.str());
@@ -1164,10 +1391,8 @@ private:
         
         if (hasHighlightedBlock) renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
         
-        // Render remote players
-        if (isOnlineMode) {
-            renderRemotePlayers(view);
-        }
+        // Render remote players (always in online-only mode)
+        renderRemotePlayers(view);
         
         // Render UI overlay
         renderUI();
@@ -1242,7 +1467,9 @@ private:
         }
         
         // Handle different game states
-        if (gameState == GameState::LOADING || gameState == GameState::CONNECTING || gameState == GameState::WAITING_FOR_WORLD) {
+        if (gameState == GameState::MAIN_MENU) {
+            renderMainMenu(width, height);
+        } else if (gameState == GameState::LOADING || gameState == GameState::CONNECTING || gameState == GameState::WAITING_FOR_WORLD) {
             // Full screen black background for loading
             textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 1.0f);
             
@@ -1271,8 +1498,8 @@ private:
         } else if (gameState == GameState::PLAYING) {
             // Normal gameplay UI
             
-            // Render connection status in top-left corner (only in online mode)
-            if (isOnlineMode && gameState == GameState::PLAYING) {
+            // Render connection status in top-left corner
+            if (gameState == GameState::PLAYING) {
                 std::string statusText;
                 float r = 1.0f, g = 1.0f, b = 1.0f;
                 
@@ -1372,7 +1599,7 @@ private:
     }
     
     void handleHelloOk(const std::string& message) {
-        // Parse: {"op":"hello_ok","client_id":"client1",...}
+        // Parse: {"op":"hello_ok","client_id":"client1", ... , "spawn":[x,y,z]}
         size_t clientIdPos = message.find("\"client_id\":\"");
         if (clientIdPos != std::string::npos) {
             size_t idStart = clientIdPos + 13;  // Length of "client_id":""
@@ -1383,6 +1610,58 @@ private:
             }
         } else {
             std::cout << "[GAME] ✓ Server accepted hello" << std::endl;
+        }
+
+        size_t spawnPos = message.find("\"spawn\":[");
+        if (spawnPos != std::string::npos) {
+            size_t bracketStart = message.find("[", spawnPos);
+            size_t bracketEnd = message.find("]", bracketStart);
+            if (bracketStart != std::string::npos && bracketEnd != std::string::npos) {
+                std::string coordsStr = message.substr(bracketStart + 1, bracketEnd - bracketStart - 1);
+                std::stringstream ss(coordsStr);
+                std::string token;
+                float spawnCoords[3];
+                int index = 0;
+                bool parseError = false;
+
+                while (std::getline(ss, token, ',') && index < 3) {
+                    try {
+                        spawnCoords[index++] = std::stof(token);
+                    } catch (const std::exception&) {
+                        parseError = true;
+                        break;
+                    }
+                }
+
+                if (!parseError && index == 3) {
+                    player.x = spawnCoords[0];
+                    player.y = spawnCoords[1];
+                    player.z = spawnCoords[2];
+                    player.velocityY = 0.0f;
+                    player.onGround = true;
+
+                    lastSafePos = { player.x, player.y, player.z };
+                    camera.x = player.x;
+                    camera.y = player.y + 1.6f;
+                    camera.z = player.z;
+
+                    int spawnChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
+                    int spawnChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
+
+                    if (spawnChunkX != lastInterestChunkX || spawnChunkZ != lastInterestChunkZ) {
+                        sendInterestMessage(spawnChunkX, spawnChunkZ);
+                        lastInterestChunkX = spawnChunkX;
+                        lastInterestChunkZ = spawnChunkZ;
+                    }
+
+                    lastPlayerChunkX = spawnChunkX;
+                    lastPlayerChunkZ = spawnChunkZ;
+
+                    std::cout << "[GAME] Applied server spawn at (" << player.x << ", " << player.y << ", " << player.z << ")" << std::endl;
+                } else {
+                    std::cerr << "[GAME] Failed to parse spawn array from hello_ok" << std::endl;
+                }
+            }
         }
     }
     

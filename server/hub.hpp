@@ -22,8 +22,8 @@
 #include "../shared/chunk.hpp"
 #include "../shared/protocol.hpp"
 #include "../shared/serialization.hpp"
-#include "../src/perlin_noise.hpp"
-#include "../src/world_generation.hpp"
+#include "../shared/perlin_noise.hpp"
+#include "../shared/world_generation.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -42,6 +42,9 @@ public:
         
         // Try to load existing world data
         loadWorld();
+        
+        // Calculate safe spawn point
+        calculateSafeSpawnPoint();
     }
     
     ~Hub() {
@@ -62,12 +65,23 @@ public:
     void markChunkModified(int cx, int cy, int cz);
     bool loadChunkIfSaved(int cx, int cy, int cz); // Returns true if loaded from disk
     
+    // Spawn point management
+    void calculateSafeSpawnPoint();
+    float getSpawnX() const { return spawnX; }
+    float getSpawnY() const { return spawnY; }
+    float getSpawnZ() const { return spawnZ; }
+    
 private:
     World world;
     std::mutex clientsMutex;
     std::unordered_map<std::shared_ptr<ClientSession>, std::string> clients; // client -> id
     int nextClientId = 1;
     std::string worldSaveDir;
+    
+    // Spawn point coordinates
+    float spawnX = SPAWN_X;
+    float spawnY = SPAWN_Y;
+    float spawnZ = SPAWN_Z;
     
     // Track which chunks have been modified and need saving
     std::unordered_set<ChunkCoord, std::hash<ChunkCoord>> modifiedChunks;
@@ -170,7 +184,7 @@ private:
         std::string message = beast::buffers_to_string(buffer_.data());
         buffer_.consume(buffer_.size());
         
-        std::cout << "[SESSION] ← " << message << std::endl;
+        // std::cout << "[SESSION] ← " << message << std::endl;
         hub_.handleMessage(shared_from_this(), message);
         
         do_read();
