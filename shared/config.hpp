@@ -62,9 +62,13 @@ constexpr int IRON_ORE_MAX_Y = 40;
 constexpr float IRON_ORE_CHANCE = 0.015f;
 
 // Texture Atlas and Ambient Occlusion
+// Atlas is 128x128 pixels, containing 16x16 pixel tiles
+// This gives us 8x8 = 64 possible tile slots
 constexpr int ATLAS_TILE_SIZE = 16;
-constexpr int ATLAS_TILES_WIDTH = 288;
-constexpr int ATLAS_TILES_HEIGHT = 16;
+constexpr int ATLAS_WIDTH = 128;
+constexpr int ATLAS_HEIGHT = 128;
+constexpr int ATLAS_TILES_WIDTH = ATLAS_WIDTH / ATLAS_TILE_SIZE;  // 8 tiles wide
+constexpr int ATLAS_TILES_HEIGHT = ATLAS_HEIGHT / ATLAS_TILE_SIZE; // 8 tiles tall
 constexpr float AO_STRENGTH = 0.5f;
 
 // Water Animation

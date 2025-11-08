@@ -41,9 +41,9 @@ The game is playable via any modern web browser when connected to a server:
 
 - [x] Main Menu
 
-- [ ] Multithreading for World and Mesh Gen
+- [ ] Multithreading for World Gen
 
-- [ ] View-frustum Culling
+- [x] View-frustum Culling
 
 - [x] Save/Load World (server-side)
 

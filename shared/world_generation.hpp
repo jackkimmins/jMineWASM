@@ -332,8 +332,6 @@ private:
         }
     }
 
-
-    // Sand patch generation
     int findUnderwaterFloorY(int wx, int wyMinInclusive, int wyMaxInclusive, int wz) const {
         int top = std::min(wyMaxInclusive, WATER_LEVEL - 1);
         for (int y = top; y >= wyMinInclusive; --y) {
@@ -367,72 +365,6 @@ private:
                 if (!b || !b->isSolid) continue;
                 if (b->type == BLOCK_STONE) {
                     setBlockAndMarkDirty(wx, floorY, wz, BLOCK_DIRT, true);
-                }
-            }
-        }
-    }
-
-    void paintSandPatchAt(int centerX, int centerZ, int minY, int maxY, int radius, int depth, std::mt19937& rng) {
-        int r2 = radius * radius;
-        for (int dx = -radius; dx <= radius; ++dx) {
-            for (int dz = -radius; dz <= radius; ++dz) {
-                if (dx*dx + dz*dz > r2) continue;
-                int wx = centerX + dx;
-                int wz = centerZ + dz;
-                if (wx < 0 || wx >= WORLD_SIZE_X || wz < 0 || wz >= WORLD_SIZE_Z) continue;
-
-                int floorY = findUnderwaterFloorY(wx, minY, maxY, wz);
-                if (floorY < 0) continue;
-
-                for (int d = 0; d < depth; ++d) {
-                    int y = floorY - d;
-                    if (y <= 0) break;
-                    Block* b = getBlockAt(wx, y, wz);
-                    if (!b || !b->isSolid) break;
-                    if (b->type == BLOCK_BEDROCK) break;
-                    if (b->type == BLOCK_WATER) break;
-                    setBlockAndMarkDirty(wx, y, wz, BLOCK_SAND, true);
-                }
-            }
-        }
-    }
-
-    void generateUnderwaterSandPatches(int cx, int cy, int cz) {
-        Chunk* chunk = getChunk(cx, cy, cz);
-        if (!chunk || !chunk->isGenerated || chunk->isFullyProcessed) return;
-
-        int baseX = cx * CHUNK_SIZE;
-        int baseY = cy * CHUNK_HEIGHT;
-        int baseZ = cz * CHUNK_SIZE;
-        if (baseY >= WATER_LEVEL) return;
-
-        normaliseUnderwaterFloorToDirt(cx, cy, cz);
-        unsigned int seed = static_cast<unsigned int>(PERLIN_SEED) ^ (cx * 0xC2B2AE35u) ^ (cz * 0x27D4EB2Fu) ^ (cy * 0x85EBCA6Bu);
-        std::mt19937 rng(seed);
-        std::uniform_real_distribution<float> r01(0.0f, 1.0f);
-        std::uniform_int_distribution<int> radiusDist(2, 4);
-        std::uniform_int_distribution<int> groupCountDist(1, 2);
-
-        const int STEP = 4;
-        for (int lx = 0; lx < CHUNK_SIZE; lx += STEP) {
-            for (int lz = 0; lz < CHUNK_SIZE; lz += STEP) {
-                int wx = baseX + lx;
-                int wz = baseZ + lz;
-
-                int floorY = findUnderwaterFloorY(wx, baseY, baseY + CHUNK_HEIGHT - 2, wz);
-                if (floorY < 0) continue;
-
-                double n = perlin.noise(wx * 0.02, 123.45, wz * 0.02) * 0.5 + 0.5; // [0,1]
-                if (!(n > 0.65 && r01(rng) < 0.25f)) continue;
-                int groups = groupCountDist(rng);
-                int baseRadius = radiusDist(rng);
-                int depth = (r01(rng) < 0.2f) ? 2 : 1;
-
-                for (int g = 0; g < groups; ++g) {
-                    int jx = wx + static_cast<int>(std::round((r01(rng) - 0.5f) * baseRadius * 1.5f));
-                    int jz = wz + static_cast<int>(std::round((r01(rng) - 0.5f) * baseRadius * 1.5f));
-                    int r = std::max(1, baseRadius + (int)std::floor((r01(rng) - 0.5f) * 2.0f));
-                    paintSandPatchAt(jx, jz, baseY, baseY + CHUNK_HEIGHT - 2, r, depth, rng);
                 }
             }
         }
@@ -967,21 +899,6 @@ public:
                 }
             }
         }
-
-        // Pass 2.5: underwater sand
-        for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
-            for (int cz = centerChunkZ - CHUNK_LOAD_DISTANCE; cz <= centerChunkZ + CHUNK_LOAD_DISTANCE; ++cz) {
-                int dx = cx - centerChunkX;
-                int dz = cz - centerChunkZ;
-                if (dx * dx + dz * dz > CHUNK_LOAD_DISTANCE * CHUNK_LOAD_DISTANCE) continue;
-                if (!isChunkInBounds(cx, 0, cz)) continue;
-
-                for (int cy = 0; cy < WORLD_CHUNK_SIZE_Y; ++cy) {
-                    Chunk* chunk = getChunk(cx, cy, cz);
-                    if (chunk && chunk->isGenerated && !chunk->isFullyProcessed) generateUnderwaterSandPatches(cx, cy, cz);
-                }
-            }
-        }
         
         // Pass 3: caves
         for (int cx = centerChunkX - CHUNK_LOAD_DISTANCE; cx <= centerChunkX + CHUNK_LOAD_DISTANCE; ++cx) {
@@ -1146,6 +1063,9 @@ public:
         chunk->isGenerated = true;
         chunk->isDirty = true;
         chunk->isFullyProcessed = true;
+        
+        // Mark neighboring chunks as dirty so they regenerate their boundary faces
+        markChunkDirty(cx, cy, cz);
         
         // Add to loaded chunks set so updateDirtyChunks can find it
         ChunkCoord coord{cx, cy, cz};

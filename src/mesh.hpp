@@ -13,6 +13,7 @@
 #include "../shared/config.hpp"
 #include "../shared/types.hpp"
 #include "../shared/chunk.hpp"
+#include "frustum.hpp"
 
 class ChunkMesh {
 public:
@@ -138,10 +139,21 @@ public:
                     bool isFoliage = (block.type == BLOCK_LEAVES);
 
                     auto shouldRenderFaceAgainst = [&](const Block* neighbor, BlockType selfType) -> bool {
-                        if (!neighbor || !neighbor->isSolid) return true;
+                        // If neighbor is nullptr, it means the chunk boundary block doesn't exist yet
+                        // In this case, assume it's solid to prevent rendering internal faces
+                        if (!neighbor) return false;
+                        
+                        // If neighbor is not solid (air), render the face
+                        if (!neighbor->isSolid) return true;
+                        
+                        // Special handling for leaves
                         if (selfType == BLOCK_LEAVES && neighbor->type == BLOCK_LEAVES) return false;
                         if (selfType == BLOCK_LEAVES) return true;
+                        
+                        // Render faces against water and leaves
                         if (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES) return true;
+                        
+                        // Don't render faces against other solid blocks
                         return false;
                     };
 
@@ -153,6 +165,7 @@ public:
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
                             // Only render water face if neighbor exists and is not water
+                            // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
                                 addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_RIGHT, block.type, world, isWater, isFoliage);
                             }
@@ -170,6 +183,7 @@ public:
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
                             // Only render water face if neighbor exists and is not water
+                            // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
                                 addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_LEFT, block.type, world, isWater, isFoliage);
                             }
@@ -187,6 +201,7 @@ public:
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
                             // Only render water face if neighbor exists and is not water
+                            // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
                                 addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_TOP, block.type, world, isWater, isFoliage);
                             }
@@ -206,6 +221,7 @@ public:
                         if (!isBottomFaceBedrock) {
                             if (isWater) {
                                 // Only render water face if neighbor exists and is not water
+                                // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                                 if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
                                     addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BOTTOM, block.type, world, isWater, isFoliage);
                                 }
@@ -224,6 +240,7 @@ public:
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
                             // Only render water face if neighbor exists and is not water
+                            // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
                                 addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_FRONT, block.type, world, isWater, isFoliage);
                             }
@@ -241,6 +258,7 @@ public:
                         const Block* neighbor = world.getBlockAt(nx, ny, nz);
                         if (isWater) {
                             // Only render water face if neighbor exists and is not water
+                            // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
                                 addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BACK, block.type, world, isWater, isFoliage);
                             }
@@ -286,20 +304,43 @@ public:
         }
     }
     
-    void drawVisibleChunksSolid(float playerX, float playerZ) {
+    void drawVisibleChunksSolid(float playerX, float playerZ, const Frustum* frustum = nullptr) {
         int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
         int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
+        
+        int chunksRendered = 0;
+        int chunksCulled = 0;
         
         for (auto& pair : chunkMeshes) {
             const ChunkCoord& coord = pair.first;
             int dx = coord.x - centerChunkX;
             int dz = coord.z - centerChunkZ;
-            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
+            
+            // Distance culling (2D horizontal distance)
+            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) {
+                continue;
+            }
+            
+            // Frustum culling (if frustum is provided)
+            if (frustum) {
+                if (!frustum->isChunkVisible(coord.x, coord.y, coord.z, CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE)) {
+                    chunksCulled++;
+                    continue;
+                }
+            }
+            
             pair.second->drawSolid();
+            chunksRendered++;
+        }
+        
+        // Debug output (can be removed in production)
+        static int frameCount = 0;
+        if (++frameCount % 60 == 0) {
+            // std::cout << "[RENDER] Chunks rendered: " << chunksRendered << ", culled: " << chunksCulled << std::endl;
         }
     }
     
-    void drawVisibleChunksWater(float playerX, float playerZ) {
+    void drawVisibleChunksWater(float playerX, float playerZ, const Frustum* frustum = nullptr) {
         int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
         int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
         
@@ -307,7 +348,19 @@ public:
             const ChunkCoord& coord = pair.first;
             int dx = coord.x - centerChunkX;
             int dz = coord.z - centerChunkZ;
-            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
+            
+            // Distance culling (2D horizontal distance)
+            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) {
+                continue;
+            }
+            
+            // Frustum culling (if frustum is provided)
+            if (frustum) {
+                if (!frustum->isChunkVisible(coord.x, coord.y, coord.z, CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE)) {
+                    continue;
+                }
+            }
+            
             pair.second->drawWater();
         }
     }
@@ -336,21 +389,21 @@ private:
                 switch (face) {
                     case FACE_TOP:    return 3;
                     case FACE_BOTTOM: return 1;
-                    default:          return 4;
+                    default:          return 2;
                 }
             case BLOCK_STONE:    return 0;
             case BLOCK_DIRT:     return 1;
-            case BLOCK_PLANKS:   return 2;
-            case BLOCK_BEDROCK:  return 5;
-            case BLOCK_COAL_ORE: return 6;
-            case BLOCK_IRON_ORE: return 7;
-            case BLOCK_LOG:      return 8;
-            case BLOCK_LEAVES:   return 9;
-            case BLOCK_WATER:    return 10;
-            case BLOCK_SAND:     return 14;
-            case BLOCK_TALL_GRASS:return 15;
-            case BLOCK_ORANGE_FLOWER: return 16;
-            case BLOCK_BLUE_FLOWER: return 17;
+            case BLOCK_BEDROCK:  return 4;
+            case BLOCK_COAL_ORE: return 5;
+            case BLOCK_IRON_ORE: return 6;
+            case BLOCK_LOG:      return 7;
+            case BLOCK_LEAVES:   return 8;
+            case BLOCK_WATER:    return 9;
+            case BLOCK_SAND:     return 13;
+            case BLOCK_TALL_GRASS:return 14;
+            case BLOCK_ORANGE_FLOWER: return 15;
+            case BLOCK_BLUE_FLOWER: return 16;
+            case BLOCK_PLANKS:   return 17;
             default:             return 0;
         }
     }
@@ -361,10 +414,12 @@ private:
         int tileX = textureIndex % ATLAS_TILES_WIDTH;
         int tileY = textureIndex / ATLAS_TILES_WIDTH;
 
-        float u0 = (tileX * ATLAS_TILE_SIZE) / float(ATLAS_TILES_WIDTH);
-        float v0 = (tileY * ATLAS_TILE_SIZE) / float(ATLAS_TILES_HEIGHT);
-        float u1 = ((tileX + 1) * ATLAS_TILE_SIZE) / float(ATLAS_TILES_WIDTH);
-        float v1 = ((tileY + 1) * ATLAS_TILE_SIZE) / float(ATLAS_TILES_HEIGHT);
+        // Add small UV inset to prevent texture bleeding
+        const float uvInset = 0.001f;
+        float u0 = (tileX * ATLAS_TILE_SIZE) / float(ATLAS_WIDTH) + uvInset;
+        float v0 = (tileY * ATLAS_TILE_SIZE) / float(ATLAS_HEIGHT) + uvInset;
+        float u1 = ((tileX + 1) * ATLAS_TILE_SIZE) / float(ATLAS_WIDTH) - uvInset;
+        float v1 = ((tileY + 1) * ATLAS_TILE_SIZE) / float(ATLAS_HEIGHT) - uvInset;
         float uv[4][2] = { {u0,v1}, {u1,v1}, {u1,v0}, {u0,v0} };
 
         std::vector<float>& vertices = mesh.solidVertices;
@@ -417,10 +472,13 @@ private:
         
         int tileX = textureIndex % ATLAS_TILES_WIDTH;
         int tileY = textureIndex / ATLAS_TILES_WIDTH;
-        float u0 = (tileX * ATLAS_TILE_SIZE) / float(ATLAS_TILES_WIDTH);
-        float v0 = (tileY * ATLAS_TILE_SIZE) / float(ATLAS_TILES_HEIGHT);
-        float u1 = ((tileX + 1) * ATLAS_TILE_SIZE) / float(ATLAS_TILES_WIDTH);
-        float v1 = ((tileY + 1) * ATLAS_TILE_SIZE) / float(ATLAS_TILES_HEIGHT);
+        
+        // Add small UV inset to prevent texture bleeding between atlas tiles
+        const float uvInset = 0.001f;
+        float u0 = (tileX * ATLAS_TILE_SIZE) / float(ATLAS_WIDTH) + uvInset;
+        float v0 = (tileY * ATLAS_TILE_SIZE) / float(ATLAS_HEIGHT) + uvInset;
+        float u1 = ((tileX + 1) * ATLAS_TILE_SIZE) / float(ATLAS_WIDTH) - uvInset;
+        float v1 = ((tileY + 1) * ATLAS_TILE_SIZE) / float(ATLAS_HEIGHT) - uvInset;
         float texCoords[4][2] = { {u0,v1}, {u1,v1}, {u1,v0}, {u0,v0} };
         
         float aoValues[4] = {0.0f, 0.0f, 0.0f, 0.0f};

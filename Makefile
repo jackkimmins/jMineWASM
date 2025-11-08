@@ -1,88 +1,116 @@
-EMCC = em++
-CXX = g++
-SRC_DIR = src
-SHARED_DIR = shared
-SERVER_DIR = server
-CLIENT_DIR = client
-BUILD_DIR = build
-WWW_DIR = www
-BIN_DIR = bin
-SRC = $(SRC_DIR)/main.cpp
-ASSETS_DIR = assets
-SHELLFILE = shell_minimal.html
-OUT = $(BUILD_DIR)/index.html
-SERVER_OUT = $(BIN_DIR)/jMineServer
+# --- Toolchains
+EMCC        = em++
+CXX         = g++
 
-# Client build flags (WebAssembly)
-CLIENT_CFLAGS = -O3 \
-        -s USE_WEBGL2=1 \
-        -s FULL_ES3=1 \
-        -s WASM=1 \
-        -s ALLOW_MEMORY_GROWTH=1 \
-        -s AUTO_JS_LIBRARIES=1 \
-        -s TOTAL_MEMORY=536870912 \
-        -s TOTAL_STACK=8388608 \
-        -s EXPORTED_FUNCTIONS='["_main", "_setPointerLocked"]' \
-        -std=c++20 \
-        -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap']" \
-        -s ASSERTIONS=1 \
-        -lwebsocket.js \
-        --preload-file $(ASSETS_DIR)@/assets
+# --- Project layout
+SRC_DIR     = src
+SHARED_DIR  = shared
+SERVER_DIR  = server
+CLIENT_DIR  = client
+ASSETS_DIR  = assets
+SHELLFILE   = shell_minimal.html
 
-# Server build flags (native Linux)
-SERVER_CFLAGS = -std=c++20 -O3 -pthread -Wall -Wextra
-SERVER_LIBS = -lboost_system -lboost_filesystem
+# --- Build layout
+BUILD_DIR        = build
+CLIENT_BUILD     = $(BUILD_DIR)/client
+SERVER_BUILD     = $(BUILD_DIR)/server
+OBJ_DIR          = $(BUILD_DIR)/obj
+CLIENT_OBJ_DIR   = $(OBJ_DIR)/client
+SERVER_OBJ_DIR   = $(OBJ_DIR)/server
 
-# Default target
+# --- Sources
+CLIENT_SRC  := $(wildcard $(CLIENT_DIR)/*.cpp) \
+               $(wildcard $(SRC_DIR)/*.cpp) \
+               $(wildcard $(SHARED_DIR)/*.cpp)
+SERVER_SRC  := $(wildcard $(SERVER_DIR)/*.cpp) \
+               $(wildcard $(SHARED_DIR)/*.cpp)
+
+# --- Objects & deps
+CLIENT_OBJS := $(CLIENT_SRC:%=$(CLIENT_OBJ_DIR)/%.o)
+SERVER_OBJS := $(SERVER_SRC:%=$(SERVER_OBJ_DIR)/%.o)
+CLIENT_DEPS := $(CLIENT_OBJS:.o=.d)
+SERVER_DEPS := $(SERVER_OBJS:.o=.d)
+
+# --- Outputs
+CLIENT_HTML = $(CLIENT_BUILD)/index.html
+SERVER_BIN  = $(SERVER_BUILD)/jMineServer
+
+# --- Flags
+DEPFLAGS        = -MMD -MP
+WARNINGS = -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable
+
+CLIENT_EMLIBS = -lwebsocket.js
+
+# Client compile flags (compile-only; quiet)
+CLIENT_CPPFLAGS = -std=c++20 -O3 $(DEPFLAGS) $(WARNINGS)
+
+# Client link flags (emscripten -s settings)
+CLIENT_EMFLAGS = \
+  -s USE_WEBGL2=1 \
+  -s FULL_ES3=1 \
+  -s WASM=1 \
+  -s ALLOW_MEMORY_GROWTH=1 \
+  -s AUTO_JS_LIBRARIES=1 \
+  -s TOTAL_MEMORY=536870912 \
+  -s TOTAL_STACK=8388608 \
+  -s EXPORTED_FUNCTIONS='["_main","_setPointerLocked"]' \
+  -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap']" \
+  -s ASSERTIONS=1
+
+CLIENT_LINK_FLAGS = $(CLIENT_EMFLAGS) $(CLIENT_EMLIBS) --shell-file $(SHELLFILE) --preload-file $(ASSETS_DIR)@/assets
+
+# Server flags
+SERVER_CFLAGS = -std=c++20 -O3 -flto -pthread $(DEPFLAGS) $(WARNINGS)
+SERVER_LIBS   = -lboost_system -lboost_filesystem
+
+# Default
 all: client server
 
-# Client target (browser build)
-client: $(OUT)
+# --- Client
+client: $(CLIENT_HTML)
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+$(CLIENT_HTML): $(CLIENT_OBJS) | $(CLIENT_BUILD)
+	@echo "Linking client → $(CLIENT_HTML)"
+	$(EMCC) $(CLIENT_CPPFLAGS) $(CLIENT_OBJS) -o $@ $(CLIENT_LINK_FLAGS)
+	# Copy raw assets alongside the preloaded bundle
+	@if [ -d "$(ASSETS_DIR)" ]; then \
+	  mkdir -p "$(CLIENT_BUILD)/assets"; \
+	  cp -a "$(ASSETS_DIR)/." "$(CLIENT_BUILD)/assets/"; \
+	fi
+	@echo "Client ready in $(CLIENT_BUILD)"
 
-$(OUT): $(SRC) | $(BUILD_DIR)
-	@echo "Building client (WebAssembly)..."
-	$(EMCC) $(CLIENT_CFLAGS) $(SRC) -o $(OUT) --shell-file $(SHELLFILE)
-	@echo "Client build complete: $(OUT)"
+# Client object rule
+$(CLIENT_OBJ_DIR)/%.cpp.o: %.cpp
+	@mkdir -p "$(dir $@)"
+	$(EMCC) $(CLIENT_CPPFLAGS) -c $< -o $@
 
-# Server target (native Linux)
-server: $(SERVER_OUT)
+# --- Server
+server: $(SERVER_BIN)
 
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
+$(SERVER_BIN): $(SERVER_OBJS) | $(SERVER_BUILD)
+	@echo "Linking server → $(SERVER_BIN)"
+	$(CXX) $(SERVER_CFLAGS) $(SERVER_OBJS) -o $@ $(SERVER_LIBS)
+	@echo "Server ready in $(SERVER_BUILD)"
 
-$(SERVER_OUT): $(SERVER_DIR)/main.cpp $(SERVER_DIR)/hub.cpp $(SERVER_DIR)/hub.hpp | $(BIN_DIR)
-	@echo "Building server (native Linux)..."
-	$(CXX) $(SERVER_CFLAGS) $(SERVER_DIR)/main.cpp $(SERVER_DIR)/hub.cpp -o $(SERVER_OUT) $(SERVER_LIBS)
-	@echo "Server build complete: $(SERVER_OUT)"
+$(SERVER_OBJ_DIR)/%.cpp.o: %.cpp
+	@mkdir -p "$(dir $@)"
+	$(CXX) $(SERVER_CFLAGS) -c $< -o $@
 
-# Prepare www directory for server deployment
-www: client
-	@echo "Preparing www directory..."
-	mkdir -p $(WWW_DIR)
-	cp $(BUILD_DIR)/index.html $(WWW_DIR)/
-	cp $(BUILD_DIR)/index.js $(WWW_DIR)/
-	cp $(BUILD_DIR)/index.wasm $(WWW_DIR)/
-	cp $(BUILD_DIR)/index.data $(WWW_DIR)/
-	cp -r $(ASSETS_DIR) $(WWW_DIR)/
-	@echo "www directory ready"
+# --- Dirs
+$(CLIENT_BUILD) $(SERVER_BUILD):
+	@mkdir -p $@
 
-# Package everything for deployment
-package: all www
-	@echo "Packaging complete"
-	@echo "Run: $(SERVER_OUT) --root ./$(WWW_DIR) --port 8888"
-
-# Clean build artifacts
+# --- Convenience
 clean:
 	@echo "Cleaning build artifacts..."
-	rm -rf $(BUILD_DIR) $(WWW_DIR) $(BIN_DIR)
+	rm -rf "$(BUILD_DIR)"
 	@echo "Clean complete"
 
-# Run server with default settings
-run: all www
-	@echo "Starting server on port 8888..."
-	$(SERVER_OUT) --root ./$(WWW_DIR) --port 8888
+# Start from build/server so world saves land there; serve build/client
+run: all
+	@echo "Starting server on port 8888 (serving from ../client)..."
+	cd "$(SERVER_BUILD)" && ./jMineServer --root ../client --port 8888
 
-.PHONY: all client server www package clean run
+.PHONY: all client server clean run
+-include $(CLIENT_DEPS)
+-include $(SERVER_DEPS)
