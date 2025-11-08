@@ -288,6 +288,40 @@ public:
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
     }
+    
+    // Draw a rectangle at specified screen coordinates
+    void drawRect(float x, float y, float width, float height, float r, float g, float b, float alpha) {
+        overlayShader->use();
+        glUniform4f(overlayColorLoc, r, g, b, alpha);
+        
+        // Convert screen coordinates to NDC (-1 to 1)
+        float ndcLeft = (x / screenWidth) * 2.0f - 1.0f;
+        float ndcRight = ((x + width) / screenWidth) * 2.0f - 1.0f;
+        float ndcTop = 1.0f - (y / screenHeight) * 2.0f;
+        float ndcBottom = 1.0f - ((y + height) / screenHeight) * 2.0f;
+        
+        float vertices[] = {
+            ndcLeft,  ndcTop,
+            ndcLeft,  ndcBottom,
+            ndcRight, ndcBottom,
+            ndcLeft,  ndcTop,
+            ndcRight, ndcBottom,
+            ndcRight, ndcTop
+        };
+        
+        GLuint tempVAO, tempVBO;
+        glGenVertexArrays(1, &tempVAO);
+        glGenBuffers(1, &tempVBO);
+        glBindVertexArray(tempVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, tempVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
+        glDeleteBuffers(1, &tempVBO);
+        glDeleteVertexArrays(1, &tempVAO);
+    }
 
     int getScreenWidth() const { return screenWidth; }
     int getScreenHeight() const { return screenHeight; }

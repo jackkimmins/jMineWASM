@@ -212,6 +212,11 @@ inline void Game::applyPhysics(float dt) {
 inline void Game::processInput(float dt) {
     currentTime += dt;
 
+    // Don't process player movement when chat is open
+    if (chatSystem.isChatOpen()) {
+        return;
+    }
+
     float baseSpeed = isSprinting ? SPRINT_SPEED : PLAYER_SPEED;
     if (isFlying) {
         baseSpeed = FLY_SPEED;

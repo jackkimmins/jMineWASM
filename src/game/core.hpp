@@ -76,6 +76,10 @@ public:
     GLint menuScrollLoc;
     float menuScrollOffset = 0.0f;
 
+    // Chat system
+    ChatSystem chatSystem;
+    bool chatJustOpened = false;  // Track if chat was just opened to prevent 'T' from appearing
+
     Game();
 
     void init();
@@ -86,6 +90,7 @@ public:
     void handleMouseClick(int button);
     void handleMenuMouseMove(float x, float y);
     void handleMenuClick(float x, float y);
+    void handleCharInput(char c);
 
     void updateChunks();
     void updateHighlightedBlock();
@@ -148,12 +153,18 @@ private:
     void sendHelloMessage();
     void sendInterestMessage(int centerX, int centerZ);
     void sendPoseUpdate();
+    void sendChatMessage(const std::string& message);
     void handleServerMessage(const std::string& message);
     void handleHelloOk(const std::string& message);
     void handleChunkFull(const std::string& message);
     void handleChunkUnload(const std::string& message);
     void handleBlockUpdate(const std::string& message);
     void handlePlayerSnapshot(const std::string& message);
+    void handleChatMessage(const std::string& message);
+    void handleSystemMessage(const std::string& message);
+
+    // Chat rendering
+    void renderChat();
 
     // Math
     mat4 perspective(float fov, float aspect, float near, float far) const;

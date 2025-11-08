@@ -49,6 +49,15 @@ EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *user
     if (eventType == EMSCRIPTEN_EVENT_KEYDOWN || eventType == EMSCRIPTEN_EVENT_KEYUP) {
         bool pressed = eventType == EMSCRIPTEN_EVENT_KEYDOWN;
         gameInstance->handleKey(e->keyCode, pressed);
+        
+        // Handle character input for chat when chat is open and key is pressed
+        if (pressed && gameInstance->chatSystem.isChatOpen() && e->key[0] != '\0' && e->key[1] == '\0') {
+            // Single character key (not special keys like "Enter", "Shift", etc.)
+            char c = e->key[0];
+            if (c >= 32 && c <= 126) {  // Printable ASCII
+                gameInstance->handleCharInput(c);
+            }
+        }
     }
     return EM_TRUE;
 }

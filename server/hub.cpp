@@ -11,6 +11,8 @@ void Hub::addClient(std::shared_ptr<ClientSession> client) {
     std::string clientId = "client" + std::to_string(nextClientId++);
     clients[client] = clientId;
     std::cout << "[HUB] Added " << clientId << " (total: " << clients.size() << ")" << std::endl;
+    
+    // Don't broadcast join message here - wait until after hello_ok is sent
 }
 
 void Hub::calculateSafeSpawnPoint() {
@@ -90,11 +92,20 @@ void Hub::calculateSafeSpawnPoint() {
 }
 
 void Hub::removeClient(std::shared_ptr<ClientSession> client) {
-    std::lock_guard<std::mutex> lock(clientsMutex);
-    auto it = clients.find(client);
-    if (it != clients.end()) {
-        std::cout << "[HUB] Removed " << it->second << std::endl;
-        clients.erase(it);
+    std::string clientId;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex);
+        auto it = clients.find(client);
+        if (it != clients.end()) {
+            clientId = it->second;
+            std::cout << "[HUB] Removed " << it->second << std::endl;
+            clients.erase(it);
+        }
+    }
+    
+    // Broadcast leave message if client was known
+    if (!clientId.empty()) {
+        broadcastSystemMessage(clientId + " left the server");
     }
 }
 
@@ -147,6 +158,8 @@ void Hub::handleMessage(std::shared_ptr<ClientSession> client, const std::string
         }
     } else if (op == ClientOp::EDIT) {
         handleEdit(client, message);
+    } else if (op == ClientOp::CHAT) {
+        handleChat(client, message);
     } else {
         std::cerr << "[HUB] Unknown op: " << op << std::endl;
     }
@@ -206,6 +219,13 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
     std::string responseStr = response.str();
     std::cout << "[HUB] → hello_ok (client_id: " << clientId << ", spawn: [" << spawnX << "," << spawnY << "," << spawnZ << "])" << std::endl;
     client->send(responseStr);
+    
+    // Send welcome messages to the new client
+    sendSystemMessage(client, "Welcome to jMineWASM Multiplayer!");
+    sendSystemMessage(client, "Press T to open chat");
+    
+    // Broadcast join message to all clients
+    broadcastSystemMessage(clientId + " joined the server");
 }
 
 void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::string& message) {
@@ -867,4 +887,76 @@ void Hub::broadcastPlayerSnapshot() {
         // Send to this specific client
         receiverClient->send(json.str());
     }
+}
+
+void Hub::handleChat(std::shared_ptr<ClientSession> client, const std::string& message) {
+    // Parse: {"op":"chat","message":"Hello world!"}
+    size_t messagePos = message.find("\"message\":\"");
+    if (messagePos == std::string::npos) {
+        std::cerr << "[HUB] Invalid chat message format" << std::endl;
+        return;
+    }
+    
+    // Extract message text
+    size_t msgStart = messagePos + 11;  // Length of "message":"
+    size_t msgEnd = message.find("\"", msgStart);
+    if (msgEnd == std::string::npos) return;
+    std::string msgText = message.substr(msgStart, msgEnd - msgStart);
+    
+    // Get sender's client ID
+    std::string senderId;
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex);
+        auto it = clients.find(client);
+        if (it != clients.end()) {
+            senderId = it->second;
+        }
+    }
+    
+    if (senderId.empty()) {
+        std::cerr << "[HUB] Cannot send chat message from unknown client" << std::endl;
+        return;
+    }
+    
+    std::cout << "[CHAT] " << senderId << ": " << msgText << std::endl;
+    
+    // Broadcast to all clients
+    broadcastChatMessage(senderId, msgText);
+}
+
+void Hub::broadcastChatMessage(const std::string& sender, const std::string& message) {
+    std::lock_guard<std::mutex> lock(clientsMutex);
+    
+    std::ostringstream json;
+    json << "{\"op\":\"" << ServerOp::CHAT_MESSAGE << "\""
+         << ",\"sender\":\"" << sender << "\""
+         << ",\"message\":\"" << message << "\"}";
+    
+    std::string jsonStr = json.str();
+    
+    for (auto& [client, clientId] : clients) {
+        client->send(jsonStr);
+    }
+}
+
+void Hub::broadcastSystemMessage(const std::string& message) {
+    std::lock_guard<std::mutex> lock(clientsMutex);
+    
+    std::ostringstream json;
+    json << "{\"op\":\"" << ServerOp::SYSTEM_MESSAGE << "\""
+         << ",\"message\":\"" << message << "\"}";
+    
+    std::string jsonStr = json.str();
+    
+    for (auto& [client, clientId] : clients) {
+        client->send(jsonStr);
+    }
+}
+
+void Hub::sendSystemMessage(std::shared_ptr<ClientSession> client, const std::string& message) {
+    std::ostringstream json;
+    json << "{\"op\":\"" << ServerOp::SYSTEM_MESSAGE << "\""
+         << ",\"message\":\"" << message << "\"}";
+    
+    client->send(json.str());
 }

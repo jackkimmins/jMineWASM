@@ -31,6 +31,34 @@ inline void Game::handleKey(int keyCode, bool pressed) {
         return; // Don't process other keys in menu
     }
 
+    // Handle chat input
+    if (chatSystem.isChatOpen()) {
+        if (keyCode == 13 && pressed) { // Enter - send message
+            std::string message = chatSystem.submitInput();
+            if (!message.empty()) {
+                sendChatMessage(message);
+            }
+            return;
+        }
+        else if (keyCode == 27 && pressed) { // Escape - close chat
+            chatSystem.closeChat();
+            return;
+        }
+        else if (keyCode == 8 && pressed) { // Backspace
+            chatSystem.backspaceInput();
+            return;
+        }
+        // Don't process other game keys when chat is open
+        return;
+    }
+
+    // T key to open chat
+    if (keyCode == 84 && pressed) { // T key
+        chatSystem.openChat();
+        chatJustOpened = true;  // Mark that chat was just opened
+        return;
+    }
+
     // Fly mode
     if (keyCode == 32) { // Space
         if (pressed && !lastSpaceKeyState) {
@@ -69,13 +97,34 @@ inline void Game::handleKey(int keyCode, bool pressed) {
     if (keyCode == 83 && pressed) isSprinting = false;
 }
 
+inline void Game::handleCharInput(char c) {
+    // Only handle character input when chat is open
+    if (chatSystem.isChatOpen()) {
+        // If chat was just opened, skip this character (to prevent 'T' from appearing)
+        if (chatJustOpened) {
+            chatJustOpened = false;
+            return;
+        }
+        
+        // Filter out control characters
+        if (c >= 32 && c <= 126) {
+            chatSystem.appendToInput(c);
+        }
+    }
+}
+
 inline void Game::handleMouseMove(float movementX, float movementY) {
     if (!pointerLocked) return;
+    // Don't move camera when chat is open
+    if (chatSystem.isChatOpen()) return;
     camera.yaw   += movementX * SENSITIVITY;
     camera.pitch = std::clamp(camera.pitch - movementY * SENSITIVITY, -89.0f, 89.0f);
 }
 
 inline void Game::handleMouseClick(int button) {
+    // Don't handle clicks when chat is open
+    if (chatSystem.isChatOpen()) return;
+    
     float maxDistance = 4.5f;
     RaycastHit hit = raycast(maxDistance);
     if (!hit.hit) return;

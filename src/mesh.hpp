@@ -275,13 +275,7 @@ public:
         mesh->setup();
     }
     
-    void updateDirtyChunks(World& world) {
-        static int callCount = 0;
-        callCount++;
-        if (callCount % 60 == 0) {  // Log every 60 calls (roughly once per second at 60fps)
-            std::cout << "[MESH] updateDirtyChunks called (call #" << callCount << "), checking " << world.getLoadedChunks().size() << " loaded chunks" << std::endl;
-        }
-        
+    void updateDirtyChunks(World& world) {     
         int dirtyCount = 0;
         int checkedCount = 0;
         for (const auto& coord : world.getLoadedChunks()) {
@@ -290,17 +284,12 @@ public:
             if (chunk) {
                 if (chunk->isDirty) {
                     dirtyCount++;
-                    std::cout << "[MESH] Regenerating mesh for dirty chunk (" << coord.x << "," << coord.y << "," << coord.z << ")" << std::endl;
                     generateChunkMesh(world, coord.x, coord.y, coord.z);
                     chunk->isDirty = false;
-                    std::cout << "[MESH] Mesh regeneration complete for chunk (" << coord.x << "," << coord.y << "," << coord.z << ")" << std::endl;
                 }
             } else {
                 std::cout << "[MESH] WARNING: Could not get chunk (" << coord.x << "," << coord.y << "," << coord.z << ") for dirty check" << std::endl;
             }
-        }
-        if (dirtyCount > 0) {
-            std::cout << "[MESH] Updated " << dirtyCount << " dirty chunks out of " << checkedCount << " loaded chunks" << std::endl;
         }
     }
     

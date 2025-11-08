@@ -68,7 +68,7 @@ public:
             return;
         }
         
-        std::cout << "[NET] → " << json << std::endl;
+        // std::cout << "[NET] → " << json << std::endl;
         emscripten_websocket_send_utf8_text(socket, json.c_str());
 #endif
     }
@@ -142,7 +142,7 @@ private:
         
         if (event->isText) {
             std::string message(reinterpret_cast<const char*>(event->data), event->numBytes);
-            std::cout << "[NET] ← " << message << std::endl;
+            // std::cout << "[NET] ← " << message << std::endl;
             
             if (client->onMessageCallback) {
                 client->onMessageCallback(message);

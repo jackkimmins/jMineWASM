@@ -18,49 +18,31 @@ The game is playable via any modern web browser when connected to a server:
 ## To-Do List
 
 - [x] Procedural World Generation (server-side)
-
 - [x] Block Texture Atlas
-
 - [x] Random Ore Veins
-
 - [x] Cave Generation
-
 - [x] Trees
-
 - [ ] Lighting Engine (Day/Night Cycle + Block Light Emission)
-
 - [x] Water Lakes/Rivers/Oceans
-
 - [x] Distance Fog
-
 - [x] Tall Grass & Flowers
-
 - [ ] Flowable Liquids
-
 - [ ] Mobs (Animals + Hostile)
-
 - [x] Main Menu
-
 - [ ] Multithreading for World Gen
-
 - [x] View-frustum Culling
-
 - [x] Save/Load World (server-side)
-
 - [ ] Sound Effects
-
 - [ ] Mobile/Touch Controls
-
 - [ ] Desktop Version w/ OpenGL
-
-- [x] **Multiplayer** (w/ WebSockets)
+- [x] Multiplayer Support (w/ WebSockets)
+- [x] Player Chat System
 
   
   
 
 ## Versions
 
-  
 
 ### V1.3 - Multiplayer Update
 

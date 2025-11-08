@@ -43,7 +43,7 @@ inline void Game::handleServerMessage(const std::string& message) {
     }
 
     std::string op = message.substr(opStart + 1, opEnd - opStart - 1);
-    std::cout << "[GAME] Handling message op: " << op << std::endl;
+    // std::cout << "[GAME] Handling message op: " << op << std::endl;
 
     if (op == ServerOp::HELLO_OK) {
         handleHelloOk(message);
@@ -55,6 +55,10 @@ inline void Game::handleServerMessage(const std::string& message) {
         handlePlayerSnapshot(message);
     } else if (op == ServerOp::BLOCK_UPDATE) {
         handleBlockUpdate(message);
+    } else if (op == ServerOp::CHAT_MESSAGE) {
+        handleChatMessage(message);
+    } else if (op == ServerOp::SYSTEM_MESSAGE) {
+        handleSystemMessage(message);
     } else {
         std::cerr << "[GAME] Unknown op: " << op << std::endl;
     }
@@ -199,8 +203,6 @@ inline void Game::handleChunkFull(const std::string& message) {
             std::cout << "[GAME] ✓ Enough chunks loaded, entering gameplay" << std::endl;
         }
     }
-
-    std::cout << "[GAME] ✓ Loaded chunk (" << cx << "," << cy << "," << cz << ") from server" << std::endl;
 }
 
 inline void Game::handleChunkUnload(const std::string& message) {
@@ -217,8 +219,6 @@ inline void Game::handleChunkUnload(const std::string& message) {
     int cx = std::stoi(message.substr(message.find(":", cxPos) + 1));
     int cy = std::stoi(message.substr(message.find(":", cyPos) + 1));
     int cz = std::stoi(message.substr(message.find(":", czPos) + 1));
-
-    std::cout << "[GAME] Unloading chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
 
     // Free chunk data and mesh
     world.eraseChunk(cx, cy, cz);
@@ -400,7 +400,52 @@ inline void Game::handlePlayerSnapshot(const std::string& message) {
         pos = objEnd + 1;
     }
 
-    std::cout << "[GAME] Player snapshot: " << remotePlayers.size() << " remote players" << std::endl;
+    // std::cout << "[GAME] Player snapshot: " << remotePlayers.size() << " remote players" << std::endl;
+}
+
+inline void Game::handleChatMessage(const std::string& message) {
+    // Parse: {"op":"chat_message","sender":"Player","message":"Hello!"}
+    size_t senderPos = message.find("\"sender\":\"");
+    size_t messagePos = message.find("\"message\":\"");
+    
+    if (senderPos == std::string::npos || messagePos == std::string::npos) {
+        std::cerr << "[GAME] Invalid chat_message format" << std::endl;
+        return;
+    }
+    
+    // Extract sender
+    size_t senderStart = senderPos + 10;  // Length of "sender":"
+    size_t senderEnd = message.find("\"", senderStart);
+    if (senderEnd == std::string::npos) return;
+    std::string sender = message.substr(senderStart, senderEnd - senderStart);
+    
+    // Extract message text
+    size_t msgStart = messagePos + 11;  // Length of "message":"
+    size_t msgEnd = message.find("\"", msgStart);
+    if (msgEnd == std::string::npos) return;
+    std::string msgText = message.substr(msgStart, msgEnd - msgStart);
+    
+    std::cout << "[CHAT] " << sender << ": " << msgText << std::endl;
+    chatSystem.addPlayerMessage(sender, msgText);
+}
+
+inline void Game::handleSystemMessage(const std::string& message) {
+    // Parse: {"op":"system_message","message":"Player joined the server"}
+    size_t messagePos = message.find("\"message\":\"");
+    
+    if (messagePos == std::string::npos) {
+        std::cerr << "[GAME] Invalid system_message format" << std::endl;
+        return;
+    }
+    
+    // Extract message text
+    size_t msgStart = messagePos + 11;  // Length of "message":"
+    size_t msgEnd = message.find("\"", msgStart);
+    if (msgEnd == std::string::npos) return;
+    std::string msgText = message.substr(msgStart, msgEnd - msgStart);
+    
+    std::cout << "[SYSTEM] " << msgText << std::endl;
+    chatSystem.addSystemMessage(msgText);
 }
 
 #endif // GAME_NETWORK_HPP

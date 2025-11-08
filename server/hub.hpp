@@ -107,9 +107,13 @@ private:
     void handleHello(std::shared_ptr<ClientSession> client, const std::string& message);
     void handleSetInterest(std::shared_ptr<ClientSession> client, const std::string& message);
     void handleEdit(std::shared_ptr<ClientSession> client, const std::string& message);
+    void handleChat(std::shared_ptr<ClientSession> client, const std::string& message);
     void sendChunkFull(std::shared_ptr<ClientSession> client, int cx, int cy, int cz);
     void sendChunkUnload(std::shared_ptr<ClientSession> client, int cx, int cy, int cz);
     void broadcastBlockUpdate(int wx, int wy, int wz, uint8_t blockType, bool isSolid);
+    void broadcastChatMessage(const std::string& sender, const std::string& message);
+    void broadcastSystemMessage(const std::string& message);
+    void sendSystemMessage(std::shared_ptr<ClientSession> client, const std::string& message);
 };
 
 class ClientSession : public std::enable_shared_from_this<ClientSession> {

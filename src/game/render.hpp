@@ -239,6 +239,9 @@ inline void Game::renderUI() {
             float instructionY = centerY + 60.0f;
             textRenderer.drawTextCentered("Click to resume", instructionY, 2.0f, 0.8f, 0.8f, 0.8f, 0.9f);
         }
+        
+        // Render chat (always render when in playing state)
+        renderChat();
     }
 
     // Restore OpenGL state for 3D rendering

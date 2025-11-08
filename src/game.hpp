@@ -6,6 +6,7 @@
 #include "../shared/serialization.hpp"
 #include "text_renderer.hpp"
 #include "player_model.hpp"
+#include "chat_system.hpp"
 
 #include <sstream>
 #include <unordered_map>
@@ -31,5 +32,6 @@
 #include "game/raycast.hpp"
 #include "game/render.hpp"
 #include "game/network.hpp"
+#include "game/chat.hpp"
 
 #endif // GAME_HPP
