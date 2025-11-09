@@ -67,22 +67,34 @@ inline void Game::render() {
     glViewport(0, 0, width, height);
     projection = perspective(CAM_FOV * M_PI / 180.0f, (float)width / (float)height, 0.1f, 1000.0f);
 
-    glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
+    glClearColor(0.25f, 0.50f, 0.85f, 1.0f); // Clear to deep sky blue
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    shader->use();
     mat4 view = camera.getViewMatrix();
+
+    // Render sky gradient
+    glDepthFunc(GL_LEQUAL); // Change depth function so depth test passes when values are equal to depth buffer's content
+    skyShader->use();
+    glUniformMatrix4fv(skyViewLoc, 1, GL_FALSE, view.data);
+    glUniformMatrix4fv(skyProjLoc, 1, GL_FALSE, projection.data);
+    glBindVertexArray(skyVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glBindVertexArray(0);
+    glDepthFunc(GL_LESS); // Set depth function back to default
+
+    shader->use();
     mat4 mvp = multiply(projection, view);
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp.data);
     glUniform1f(timeLoc, gameTime);
 
     float renderRadius = float(RENDER_DISTANCE * CHUNK_SIZE);
-    float fogStart = renderRadius * 0.65f;
+    float fogStart = renderRadius * 0.45f;
     float fogEnd   = renderRadius * 0.95f;
     glUniform3f(camPosLoc, camera.x, camera.y, camera.z);
     glUniform1f(fogStartLoc, fogStart);
     glUniform1f(fogEndLoc, fogEnd);
-    glUniform3f(fogColorLoc, 0.53f, 0.81f, 0.92f);
+    // Use a middle ground between horizon (0.53, 0.81, 0.92) and sky (0.25, 0.50, 0.85)
+    glUniform3f(fogColorLoc, 0.42f, 0.68f, 0.89f);
 
     // Extract frustum planes from view-projection matrix for culling
     Frustum frustum;
@@ -98,13 +110,41 @@ inline void Game::render() {
     glPolygonOffset(-1.0f, -1.0f);
     glDepthMask(GL_FALSE);
     meshManager.drawVisibleChunksWater(player.x, player.z, &frustum);
-    glDepthMask(GL_TRUE);
     glDisable(GL_POLYGON_OFFSET_FILL);
+    
+    // THIRD PASS - Draw glass (semi-transparent)
+    // Enable back-face culling for glass to prevent seeing back faces through glass
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    meshManager.drawVisibleChunksGlass(player.x, player.z, &frustum);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_CULL_FACE);
 
     if (hasHighlightedBlock) renderBlockOutline(highlightedBlock.x, highlightedBlock.y, highlightedBlock.z, mvp);
 
     // Render remote players (always in online-only mode)
     renderRemotePlayers(view);
+
+    // Render particles (after solid geometry but before UI)
+    if (particleShader) {
+        particleShader->use();
+        glUniformMatrix4fv(particleMvpLoc, 1, GL_FALSE, mvp.data);
+        
+        // Enable blending for particles
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE); // Don't write to depth buffer
+        
+        Vector3 cameraPos = {camera.x, camera.y, camera.z};
+        particleSystem.render(view, projection, textureAtlas, cameraPos);
+        
+        // Restore state
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+        
+        // Restore main shader
+        shader->use();
+    }
 
     // Render UI overlay
     renderUI();
@@ -242,6 +282,9 @@ inline void Game::renderUI() {
         
         // Render chat (always render when in playing state)
         renderChat();
+        
+        // Render hotbar
+        renderHotbar();
     }
 
     // Restore OpenGL state for 3D rendering

@@ -198,6 +198,33 @@ inline void Game::handleChunkFull(const std::string& message) {
 
         // Transition to PLAYING after we have some chunks
         if (chunksLoaded >= 5) {
+            // Recalculate safe spawn position now that chunks are loaded
+            // This prevents the player from falling through if chunks weren't ready earlier
+            Vector3 spawnPos;
+            if (findSafeSpawn(SPAWN_X, SPAWN_Z, spawnPos)) {
+                player.x = spawnPos.x;
+                player.y = spawnPos.y;
+                player.z = spawnPos.z;
+                std::cout << "[GAME] ✓ Spawn position set to (" << spawnPos.x << ", " << spawnPos.y << ", " << spawnPos.z << ")" << std::endl;
+            } else {
+                // Fallback to height-based spawn
+                int h = world.getHeightAt(static_cast<int>(SPAWN_X), static_cast<int>(SPAWN_Z));
+                player.x = std::floor(SPAWN_X) + 0.5f;
+                player.y = h + 1.6f;
+                player.z = std::floor(SPAWN_Z) + 0.5f;
+                std::cout << "[GAME] ⚠ Using fallback spawn at height " << h << std::endl;
+            }
+
+            // Update camera and last safe position
+            camera.x = player.x;
+            camera.y = player.y + 1.8f;
+            camera.z = player.z;
+            lastSafePos = { player.x, player.y, player.z };
+
+            // Reset velocity to prevent any falling
+            player.velocityY = 0.0f;
+            player.onGround = true;
+
             gameState = GameState::PLAYING;
             loadingStatus = "Ready!";
             std::cout << "[GAME] ✓ Enough chunks loaded, entering gameplay" << std::endl;

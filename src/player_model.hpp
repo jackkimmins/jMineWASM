@@ -48,8 +48,8 @@ namespace SkinUV {
     // Head (front, back, right, left, top, bottom)
     constexpr float HEAD_FRONT[4]  = {8*PIXEL,  8*PIXEL,  16*PIXEL, 16*PIXEL};
     constexpr float HEAD_BACK[4]   = {24*PIXEL, 8*PIXEL,  32*PIXEL, 16*PIXEL};
-    constexpr float HEAD_RIGHT[4]  = {0*PIXEL,  8*PIXEL,  8*PIXEL,  16*PIXEL};
-    constexpr float HEAD_LEFT[4]   = {16*PIXEL, 8*PIXEL,  24*PIXEL, 16*PIXEL};
+    constexpr float HEAD_RIGHT[4]  = {8*PIXEL,  8*PIXEL,  0*PIXEL,  16*PIXEL};
+    constexpr float HEAD_LEFT[4]   = {24*PIXEL, 8*PIXEL,  16*PIXEL, 16*PIXEL};
     constexpr float HEAD_TOP[4]    = {8*PIXEL,  0*PIXEL,  16*PIXEL, 8*PIXEL};
     constexpr float HEAD_BOTTOM[4] = {16*PIXEL, 0*PIXEL,  24*PIXEL, 8*PIXEL};
     

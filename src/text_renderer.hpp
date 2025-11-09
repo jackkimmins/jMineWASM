@@ -325,6 +325,32 @@ public:
 
     int getScreenWidth() const { return screenWidth; }
     int getScreenHeight() const { return screenHeight; }
+    
+    // Get the projection matrix for 2D rendering
+    mat4 getProjectionMatrix() const {
+        mat4 result;
+        for (int i = 0; i < 16; i++) {
+            result.data[i] = projectionMatrix[i];
+        }
+        return result;
+    }
+    
+    // Draw a filled box at specified screen coordinates
+    void drawBox(float x, float y, float width, float height, float r, float g, float b, float alpha) {
+        drawRect(x, y, width, height, r, g, b, alpha);
+    }
+    
+    // Draw a box outline at specified screen coordinates
+    void drawBoxOutline(float x, float y, float width, float height, float r, float g, float b, float alpha, float thickness = 2.0f) {
+        // Top edge
+        drawRect(x, y, width, thickness, r, g, b, alpha);
+        // Bottom edge
+        drawRect(x, y + height - thickness, width, thickness, r, g, b, alpha);
+        // Left edge
+        drawRect(x, y, thickness, height, r, g, b, alpha);
+        // Right edge
+        drawRect(x + width - thickness, y, thickness, height, r, g, b, alpha);
+    }
 
 private:
     // ===== Font metrics (baked from JSON) =====

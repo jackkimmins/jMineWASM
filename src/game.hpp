@@ -7,6 +7,8 @@
 #include "text_renderer.hpp"
 #include "player_model.hpp"
 #include "chat_system.hpp"
+#include "inventory.hpp"
+#include "particle_system.hpp"
 
 #include <sstream>
 #include <unordered_map>
@@ -33,5 +35,6 @@
 #include "game/render.hpp"
 #include "game/network.hpp"
 #include "game/chat.hpp"
+#include "game/hotbar.hpp"
 
 #endif // GAME_HPP

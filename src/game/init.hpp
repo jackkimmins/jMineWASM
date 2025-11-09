@@ -61,10 +61,12 @@ inline void Game::init() {
                 // Leaves: 8
                 // Tall grass: 14
                 // Flowers: 15-16
+                // Glass: 19
                 bool isLeaves    = (tileIndex >= 8.0  && tileIndex < 9.0);
                 bool isWater     = (tileIndex >= 9.0  && tileIndex < 13.0);
                 bool isTallGrass = (tileIndex >= 14.0 && tileIndex < 15.0);
                 bool isFlower    = (tileIndex >= 15.0 && tileIndex < 17.0);
+                bool isGlass     = (tileIndex >= 19.0 && tileIndex < 20.0);
                 bool isCutout    = isLeaves || isTallGrass || isFlower;
 
                 // Animate water by cycling through frames 9,10,11,12
@@ -125,8 +127,8 @@ inline void Game::init() {
     glBindTexture(GL_TEXTURE_2D, textureAtlas);
 
     // Texture Parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -309,7 +311,7 @@ inline void Game::init() {
     // Setup connection handler - send hello and set_interest when connected
     netClient.setOnConnect([this]() {
         std::cout << "[GAME] Connection established, sending hello" << std::endl;
-        loadingStatus = "Connected! Requesting world data...";
+        loadingStatus = "Requesting world data...";
         gameState = GameState::WAITING_FOR_WORLD;
         wasConnected = true;
 
@@ -355,7 +357,7 @@ inline void Game::init() {
     lastSafePos = { player.x, player.y, player.z };
 
     camera.x = player.x;
-    camera.y = player.y + 1.6f;
+    camera.y = player.y + 1.8f;
     camera.z = player.z;
 
     // Don't initialize lastPlayerChunkX/Z here - keep them at -999/-999
@@ -378,6 +380,192 @@ inline void Game::init() {
     if (!textRenderer.init(canvasWidth, canvasHeight)) {
         std::cerr << "Failed to initialize text renderer" << std::endl;
     }
+
+    // Initialize hotbar inventory with blocks
+    // Slot 0: Stone
+    // Slot 1: Dirt
+    // Slot 2: Grass
+    // Slot 3: Planks
+    // Slot 4: Log
+    // Slot 5: Cobblestone
+    // Slot 6: Glass
+    // Slot 7: Clay
+    hotbarInventory.setSlot(0, BLOCK_STONE);
+    hotbarInventory.setSlot(1, BLOCK_DIRT);
+    hotbarInventory.setSlot(2, BLOCK_GRASS);
+    hotbarInventory.setSlot(3, BLOCK_PLANKS);
+    hotbarInventory.setSlot(4, BLOCK_LOG);
+    hotbarInventory.setSlot(5, BLOCK_COBBLESTONE);
+    hotbarInventory.setSlot(6, BLOCK_GLASS);
+    hotbarInventory.setSlot(7, BLOCK_CLAY);
+    hotbarInventory.selectSlot(3);
+
+    // Create hotbar shader for rendering 3D block previews
+    const char* hotbarVertexSrc = R"(#version 300 es
+            precision mediump float;
+            layout(location = 0) in vec3 aPos;
+            layout(location = 1) in vec2 aTexCoord;
+            uniform mat4 uMVP;
+            out vec2 TexCoord;
+            void main() {
+                gl_Position = uMVP * vec4(aPos, 1.0);
+                TexCoord = aTexCoord;
+            })";
+
+    const char* hotbarFragmentSrc = R"(#version 300 es
+            precision mediump float;
+            in vec2 TexCoord;
+            uniform sampler2D uTexture;
+            out vec4 FragColor;
+            void main() {
+                vec4 texColor = texture(uTexture, TexCoord);
+                if (texColor.a < 0.1) discard;
+                FragColor = texColor;
+            })";
+
+    hotbarShader = new Shader(hotbarVertexSrc, hotbarFragmentSrc);
+    hotbarMvpLoc = hotbarShader->getUniform("uMVP");
+
+    // Setup hotbar VAO/VBO/EBO for rendering block previews
+    glGenVertexArrays(1, &hotbarVAO);
+    glGenBuffers(1, &hotbarVBO);
+    glGenBuffers(1, &hotbarEBO);
+
+    // Create sky gradient shader
+    const char* skyVertexSrc = R"(#version 300 es
+            precision mediump float;
+            layout(location = 0) in vec3 aPos;
+            out vec3 worldDir;
+            uniform mat4 uView;
+            uniform mat4 uProjection;
+            void main() {
+                // Remove translation from view matrix for skybox effect
+                mat4 rotView = mat4(mat3(uView));
+                vec4 pos = uProjection * rotView * vec4(aPos, 1.0);
+                gl_Position = pos.xyww; // Set z to w for max depth
+                
+                // Use world-space position for the gradient direction
+                worldDir = aPos;
+            })";
+
+    const char* skyFragmentSrc = R"(#version 300 es
+        precision mediump float;
+        in vec3 worldDir;
+        out vec4 FragColor;
+        void main() {
+            // Normalize the world direction
+            vec3 dir = normalize(worldDir);
+            
+            // Use only the Y component (vertical) for gradient
+            // dir.y ranges from -1 (down) to 1 (up)
+            float t = clamp((dir.y + 1.0) * 0.5, 0.0, 1.0); // Remap to 0-1
+            
+            // Horizon color (light blue/cyan)
+            vec3 horizonColor = vec3(0.53, 0.81, 0.92);
+            
+            // Sky color (deeper blue)
+            vec3 skyColor = vec3(0.25, 0.50, 0.85);
+            
+            // Make horizon reach higher: sky only takes over near the top
+            vec3 color = mix(horizonColor, skyColor, smoothstep(0.4, 1.0, t));
+            
+            FragColor = vec4(color, 1.0);
+        })";
+
+    skyShader = new Shader(skyVertexSrc, skyFragmentSrc);
+    skyViewLoc = skyShader->getUniform("uView");
+    skyProjLoc = skyShader->getUniform("uProjection");
+
+    // Setup sky VAO/VBO - a cube for the skybox
+    glGenVertexArrays(1, &skyVAO);
+    glGenBuffers(1, &skyVBO);
+
+    // Skybox cube vertices
+    float skyboxVertices[] = {
+        -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+
+        -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+
+        -1.0f, -1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+        -1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f,
+
+        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f
+    };
+
+    glBindVertexArray(skyVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, skyVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(skyboxVertices), skyboxVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glBindVertexArray(0);
+
+    std::cout << "Sky gradient initialized" << std::endl;
+
+    // Create particle shader
+    const char* particleVertexSrc = R"(#version 300 es
+            precision mediump float;
+            layout(location = 0) in vec3 aPos;
+            layout(location = 1) in vec2 aTexCoord;
+            layout(location = 2) in float aAlpha;
+            uniform mat4 uMVP;
+            out vec2 TexCoord;
+            out float Alpha;
+            void main() {
+                gl_Position = uMVP * vec4(aPos, 1.0);
+                TexCoord = aTexCoord;
+                Alpha = aAlpha;
+            })";
+
+    const char* particleFragmentSrc = R"(#version 300 es
+            precision mediump float;
+            in vec2 TexCoord;
+            in float Alpha;
+            uniform sampler2D uTexture;
+            out vec4 FragColor;
+            void main() {
+                vec4 texColor = texture(uTexture, TexCoord);
+                if (texColor.a < 0.1) discard;
+                texColor.a *= Alpha;
+                FragColor = texColor;
+            })";
+
+    particleShader = new Shader(particleVertexSrc, particleFragmentSrc);
+    particleMvpLoc = particleShader->getUniform("uMVP");
+
+    std::cout << "Particle system initialized" << std::endl;
 
     lastFrame = std::chrono::steady_clock::now();
 }

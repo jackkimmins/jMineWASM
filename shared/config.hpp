@@ -28,13 +28,31 @@ constexpr float SPAWN_Z = WORLD_SIZE_Z / 2.0f;
 constexpr float BLOCK_SIZE = 1.0f;
 constexpr float GRAVITY = -28.0f;
 constexpr float JUMP_VELOCITY = 8.5f;
-constexpr float PLAYER_SPEED = 4.5f;
-constexpr float SPRINT_SPEED = 6.5f;
+constexpr float PLAYER_SPEED = 4.317f;
+constexpr float SPRINT_SPEED = 6.612f;
 constexpr float DOUBLE_TAP_TIME = 0.3f;
 constexpr float SENSITIVITY = 0.18f;
 constexpr float CAM_FOV = 80.0f;
 constexpr float epsilon = 0.001f;
 constexpr float PLAYER_HEIGHT = 1.8f;
+
+// Movement acceleration/deceleration
+constexpr float GROUND_ACCELERATION = 25.0f;
+constexpr float AIR_ACCELERATION = 8.0f;
+constexpr float GROUND_FRICTION = 18.0f;
+constexpr float AIR_FRICTION = 0.5f;
+constexpr float FLY_FRICTION = 10.0f;
+
+// Jump improvements
+constexpr float COYOTE_TIME = 0.1f;              // Grace period after leaving ledge
+constexpr float JUMP_BUFFER_TIME = 0.15f;        // Early jump input buffer
+constexpr float STEP_HEIGHT = 0.6f;              // Auto step-up height (Minecraft: 0.6 blocks)
+
+// Swimming
+constexpr float SWIM_SPEED = 2.2f;               // Minecraft swimming speed
+constexpr float SWIM_UP_SPEED = 4.0f;            // Upward swimming velocity
+constexpr float WATER_GRAVITY = -4.0f;           // Slower sinking in water
+constexpr float WATER_JUMP_VELOCITY = 4.5f;      // Jump out of water
 
 constexpr float FLY_SPEED = 24.0f;
 constexpr float FLY_VERTICAL_SPEED = 16.0f;
@@ -61,14 +79,13 @@ constexpr int IRON_ORE_MIN_Y = 5;
 constexpr int IRON_ORE_MAX_Y = 40;
 constexpr float IRON_ORE_CHANCE = 0.015f;
 
-// Texture Atlas and Ambient Occlusion
-// Atlas is 128x128 pixels, containing 16x16 pixel tiles
-// This gives us 8x8 = 64 possible tile slots
+// Texture Atlas
 constexpr int ATLAS_TILE_SIZE = 16;
 constexpr int ATLAS_WIDTH = 128;
 constexpr int ATLAS_HEIGHT = 128;
 constexpr int ATLAS_TILES_WIDTH = ATLAS_WIDTH / ATLAS_TILE_SIZE;  // 8 tiles wide
 constexpr int ATLAS_TILES_HEIGHT = ATLAS_HEIGHT / ATLAS_TILE_SIZE; // 8 tiles tall
+
 constexpr float AO_STRENGTH = 0.5f;
 
 // Water Animation

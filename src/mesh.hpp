@@ -21,8 +21,11 @@ public:
     std::vector<unsigned int> solidIndices;
     std::vector<float> waterVertices;
     std::vector<unsigned int> waterIndices;
+    std::vector<float> glassVertices;
+    std::vector<unsigned int> glassIndices;
     GLuint solidVAO, solidVBO, solidEBO;
     GLuint waterVAO, waterVBO, waterEBO;
+    GLuint glassVAO, glassVBO, glassEBO;
     bool isSetup = false;
     
     ChunkMesh() {
@@ -32,6 +35,9 @@ public:
         glGenVertexArrays(1, &waterVAO);
         glGenBuffers(1, &waterVBO);
         glGenBuffers(1, &waterEBO);
+        glGenVertexArrays(1, &glassVAO);
+        glGenBuffers(1, &glassVBO);
+        glGenBuffers(1, &glassEBO);
     }
     
     void setup() {
@@ -67,6 +73,22 @@ public:
             glBindVertexArray(0);
         }
         
+        if (!glassVertices.empty()) {
+            glBindVertexArray(glassVAO);
+            glBindBuffer(GL_ARRAY_BUFFER, glassVBO);
+            glBufferData(GL_ARRAY_BUFFER, glassVertices.size() * sizeof(float), glassVertices.data(), GL_STATIC_DRAW);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glassEBO);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, glassIndices.size() * sizeof(unsigned int), glassIndices.data(), GL_STATIC_DRAW);
+            
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+            glEnableVertexAttribArray(2);
+            glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(5 * sizeof(float)));
+            glBindVertexArray(0);
+        }
+        
         isSetup = true;
     }
     
@@ -84,6 +106,13 @@ public:
         glBindVertexArray(0);
     }
     
+    void drawGlass() const {
+        if (!isSetup || glassIndices.empty()) return;
+        glBindVertexArray(glassVAO);
+        glDrawElements(GL_TRIANGLES, glassIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    }
+    
     ~ChunkMesh() {
         glDeleteBuffers(1, &solidVBO);
         glDeleteBuffers(1, &solidEBO);
@@ -91,6 +120,9 @@ public:
         glDeleteBuffers(1, &waterVBO);
         glDeleteBuffers(1, &waterEBO);
         glDeleteVertexArrays(1, &waterVAO);
+        glDeleteBuffers(1, &glassVBO);
+        glDeleteBuffers(1, &glassEBO);
+        glDeleteVertexArrays(1, &glassVAO);
     }
 };
 
@@ -115,8 +147,11 @@ public:
         mesh->solidIndices.clear();
         mesh->waterVertices.clear();
         mesh->waterIndices.clear();
+        mesh->glassVertices.clear();
+        mesh->glassIndices.clear();
         unsigned int solidIndex = 0;
         unsigned int waterIndex = 0;
+        unsigned int glassIndex = 0;
         
         for (int x = 0; x < CHUNK_SIZE; ++x) {
             for (int y = 0; y < CHUNK_HEIGHT; ++y) {
@@ -137,6 +172,7 @@ public:
                     
                     bool isWater = (block.type == BLOCK_WATER);
                     bool isFoliage = (block.type == BLOCK_LEAVES);
+                    bool isGlass = (block.type == BLOCK_GLASS);
 
                     auto shouldRenderFaceAgainst = [&](const Block* neighbor, BlockType selfType) -> bool {
                         // If neighbor is nullptr, it means the chunk boundary block doesn't exist yet
@@ -150,8 +186,18 @@ public:
                         if (selfType == BLOCK_LEAVES && neighbor->type == BLOCK_LEAVES) return false;
                         if (selfType == BLOCK_LEAVES) return true;
                         
-                        // Render faces against water and leaves
-                        if (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES) return true;
+                        // Special handling for glass - only render against transparent blocks
+                        if (selfType == BLOCK_GLASS) {
+                            // Don't render glass-to-glass faces
+                            if (neighbor->type == BLOCK_GLASS) return false;
+                            // Only render against water and leaves (transparent blocks)
+                            if (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES) return true;
+                            // Don't render against opaque solid blocks
+                            return false;
+                        }
+                        
+                        // Render faces against water, leaves, and glass
+                        if (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES || neighbor->type == BLOCK_GLASS) return true;
                         
                         // Don't render faces against other solid blocks
                         return false;
@@ -167,11 +213,18 @@ public:
                             // Only render water face if neighbor exists and is not water
                             // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_RIGHT, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, waterIndex, FACE_RIGHT, block.type, world, isWater, isFoliage);
+                            }
+                        } else if (isGlass) {
+                            // Glass: only render if neighbor is air, water, or leaves (not opaque solids)
+                            if (neighbor && !neighbor->isSolid) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_RIGHT, block.type, world, false, false, true);
+                            } else if (neighbor && (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_RIGHT, block.type, world, false, false, true);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_RIGHT, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, solidIndex, FACE_RIGHT, block.type, world, isWater, isFoliage);
                             }
                         }
                     }
@@ -185,11 +238,18 @@ public:
                             // Only render water face if neighbor exists and is not water
                             // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_LEFT, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, waterIndex, FACE_LEFT, block.type, world, isWater, isFoliage);
+                            }
+                        } else if (isGlass) {
+                            // Glass: only render if neighbor is air, water, or leaves (not opaque solids)
+                            if (neighbor && !neighbor->isSolid) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_LEFT, block.type, world, false, false, true);
+                            } else if (neighbor && (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_LEFT, block.type, world, false, false, true);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_LEFT, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, solidIndex, FACE_LEFT, block.type, world, isWater, isFoliage);
                             }
                         }
                     }
@@ -203,11 +263,18 @@ public:
                             // Only render water face if neighbor exists and is not water
                             // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_TOP, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, waterIndex, FACE_TOP, block.type, world, isWater, isFoliage);
+                            }
+                        } else if (isGlass) {
+                            // Glass: only render if neighbor is air, water, or leaves (not opaque solids)
+                            if (neighbor && !neighbor->isSolid) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_TOP, block.type, world, false, false, true);
+                            } else if (neighbor && (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_TOP, block.type, world, false, false, true);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_TOP, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, solidIndex, FACE_TOP, block.type, world, isWater, isFoliage);
                             }
                         }
                     }
@@ -223,11 +290,18 @@ public:
                                 // Only render water face if neighbor exists and is not water
                                 // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                                 if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
-                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BOTTOM, block.type, world, isWater, isFoliage);
+                                    addFace(*mesh, worldX, worldY, worldZ, waterIndex, FACE_BOTTOM, block.type, world, isWater, isFoliage);
+                                }
+                            } else if (isGlass) {
+                                // Glass: only render if neighbor is air, water, or leaves (not opaque solids)
+                                if (neighbor && !neighbor->isSolid) {
+                                    addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_BOTTOM, block.type, world, false, false, true);
+                                } else if (neighbor && (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES)) {
+                                    addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_BOTTOM, block.type, world, false, false, true);
                                 }
                             } else {
                                 if (shouldRenderFaceAgainst(neighbor, block.type)) {
-                                    addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BOTTOM, block.type, world, isWater, isFoliage);
+                                    addFace(*mesh, worldX, worldY, worldZ, solidIndex, FACE_BOTTOM, block.type, world, isWater, isFoliage);
                                 }
                             }
                         }
@@ -242,11 +316,18 @@ public:
                             // Only render water face if neighbor exists and is not water
                             // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_FRONT, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, waterIndex, FACE_FRONT, block.type, world, isWater, isFoliage);
+                            }
+                        } else if (isGlass) {
+                            // Glass: only render if neighbor is air, water, or leaves (not opaque solids)
+                            if (neighbor && !neighbor->isSolid) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_FRONT, block.type, world, false, false, true);
+                            } else if (neighbor && (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_FRONT, block.type, world, false, false, true);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_FRONT, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, solidIndex, FACE_FRONT, block.type, world, isWater, isFoliage);
                             }
                         }
                     }
@@ -260,11 +341,18 @@ public:
                             // Only render water face if neighbor exists and is not water
                             // If neighbor is nullptr, assume solid to prevent rendering at chunk boundaries
                             if (neighbor && neighbor->type != BLOCK_WATER && (!neighbor->isSolid || neighbor->type == BLOCK_LEAVES)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BACK, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, waterIndex, FACE_BACK, block.type, world, isWater, isFoliage);
+                            }
+                        } else if (isGlass) {
+                            // Glass: only render if neighbor is air, water, or leaves (not opaque solids)
+                            if (neighbor && !neighbor->isSolid) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_BACK, block.type, world, false, false, true);
+                            } else if (neighbor && (neighbor->type == BLOCK_WATER || neighbor->type == BLOCK_LEAVES)) {
+                                addFace(*mesh, worldX, worldY, worldZ, glassIndex, FACE_BACK, block.type, world, false, false, true);
                             }
                         } else {
                             if (shouldRenderFaceAgainst(neighbor, block.type)) {
-                                addFace(*mesh, worldX, worldY, worldZ, isWater ? waterIndex : solidIndex, FACE_BACK, block.type, world, isWater, isFoliage);
+                                addFace(*mesh, worldX, worldY, worldZ, solidIndex, FACE_BACK, block.type, world, isWater, isFoliage);
                             }
                         }
                     }
@@ -354,24 +442,37 @@ public:
         }
     }
     
+    void drawVisibleChunksGlass(float playerX, float playerZ, const Frustum* frustum = nullptr) {
+        int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
+        int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
+        
+        for (auto& pair : chunkMeshes) {
+            const ChunkCoord& coord = pair.first;
+            int dx = coord.x - centerChunkX;
+            int dz = coord.z - centerChunkZ;
+            
+            // Distance culling (2D horizontal distance)
+            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) {
+                continue;
+            }
+            
+            // Frustum culling (if frustum is provided)
+            if (frustum) {
+                if (!frustum->isChunkVisible(coord.x, coord.y, coord.z, CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE)) {
+                    continue;
+                }
+            }
+            
+            pair.second->drawGlass();
+        }
+    }
+    
     void removeChunkMesh(int cx, int cy, int cz) {
         ChunkCoord coord{cx, cy, cz};
         chunkMeshes.erase(coord);
     }
     
-private:
-    bool isSolid(const World& world, int x, int y, int z) const {
-        return world.isSolidAt(x, y, z);
-    }
-    
-    bool isOpaque(const World& world, int x, int y, int z) const {
-        if (x < 0 || x >= WORLD_SIZE_X || y < 0 || y >= WORLD_SIZE_Y || z < 0 || z >= WORLD_SIZE_Z)
-            return false;
-        const Block* block = world.getBlockAt(x, y, z);
-        if (!block || !block->isSolid) return false;
-        return block->type != BLOCK_WATER && block->type != BLOCK_LEAVES;
-    }
-    
+    // Make texture index accessible for hotbar rendering
     int getTextureIndex(BlockType blockType, FaceDirection face) const {
         switch (blockType) {
             case BLOCK_GRASS:
@@ -393,8 +494,24 @@ private:
             case BLOCK_ORANGE_FLOWER: return 15;
             case BLOCK_BLUE_FLOWER: return 16;
             case BLOCK_PLANKS:   return 17;
+            case BLOCK_COBBLESTONE: return 18;
+            case BLOCK_GLASS:    return 19;
+            case BLOCK_CLAY:     return 20;
             default:             return 0;
         }
+    }
+    
+private:
+    bool isSolid(const World& world, int x, int y, int z) const {
+        return world.isSolidAt(x, y, z);
+    }
+    
+    bool isOpaque(const World& world, int x, int y, int z) const {
+        if (x < 0 || x >= WORLD_SIZE_X || y < 0 || y >= WORLD_SIZE_Y || z < 0 || z >= WORLD_SIZE_Z)
+            return false;
+        const Block* block = world.getBlockAt(x, y, z);
+        if (!block || !block->isSolid) return false;
+        return block->type != BLOCK_WATER && block->type != BLOCK_LEAVES && block->type != BLOCK_GLASS;
     }
 
     // Cross-billboard (two vertical quads) for plants like tall grass, rotated to block diagonals.
@@ -404,7 +521,7 @@ private:
         int tileY = textureIndex / ATLAS_TILES_WIDTH;
 
         // Add small UV inset to prevent texture bleeding
-        const float uvInset = 0.001f;
+        const float uvInset = 0.004f;
         float u0 = (tileX * ATLAS_TILE_SIZE) / float(ATLAS_WIDTH) + uvInset;
         float v0 = (tileY * ATLAS_TILE_SIZE) / float(ATLAS_HEIGHT) + uvInset;
         float u1 = ((tileX + 1) * ATLAS_TILE_SIZE) / float(ATLAS_WIDTH) - uvInset;
@@ -455,7 +572,7 @@ private:
     }
 
     void addFace(ChunkMesh& mesh, float x, float y, float z, unsigned int& indexOffset, 
-                 FaceDirection face, BlockType blockType, const World& world, bool isWater, bool isFoliage) {
+                 FaceDirection face, BlockType blockType, const World& world, bool isWater, bool isFoliage, bool isGlass = false) {
         int faceIndex = static_cast<int>(face);
         int textureIndex = getTextureIndex(blockType, face);
         
@@ -471,7 +588,7 @@ private:
         float texCoords[4][2] = { {u0,v1}, {u1,v1}, {u1,v0}, {u0,v0} };
         
         float aoValues[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        if (!isWater && !isFoliage) { // no AO on water or leaves
+        if (!isWater && !isFoliage && !isGlass) { // no AO on water, leaves, or glass
             for (int i = 0; i < 4; ++i) {
                 int dx = (int)faceVertices[faceIndex][i][0];
                 int dy = (int)faceVertices[faceIndex][i][1];
@@ -496,8 +613,8 @@ private:
             }
         }
         
-        std::vector<float>& vertices = isWater ? mesh.waterVertices : mesh.solidVertices;
-        std::vector<unsigned int>& indices = isWater ? mesh.waterIndices : mesh.solidIndices;
+        std::vector<float>& vertices = isGlass ? mesh.glassVertices : (isWater ? mesh.waterVertices : mesh.solidVertices);
+        std::vector<unsigned int>& indices = isGlass ? mesh.glassIndices : (isWater ? mesh.waterIndices : mesh.solidIndices);
 
         // small outward push for foliage to avoid z-fighting with adjacent solids
         const float foliageOffset = 0.0015f;

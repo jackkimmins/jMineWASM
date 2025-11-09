@@ -62,6 +62,9 @@ inline void Game::handleKey(int keyCode, bool pressed) {
     // Fly mode
     if (keyCode == 32) { // Space
         if (pressed && !lastSpaceKeyState) {
+            // Jump buffering - store jump input for a short time
+            jumpBufferCounter = JUMP_BUFFER_TIME;
+            
             float timeSinceLastPress = currentTime - lastSpaceKeyPressTime;
             if (timeSinceLastPress < DOUBLE_TAP_TIME && !isPlayerInWater()) {
                 isFlying = !isFlying;
@@ -74,27 +77,40 @@ inline void Game::handleKey(int keyCode, bool pressed) {
             lastSpaceKeyPressTime = currentTime;
         }
 
-        if (pressed && player.onGround && !isFlying && !isPlayerInWater()) {
-            player.velocityY = JUMP_VELOCITY;
-            player.onGround = false;
-        }
-
         lastSpaceKeyState = pressed;
     }
 
-    // Sprint toggle
-    if (keyCode == 87) { // W key
-        if (pressed && !lastWKeyState) {
-            float timeSinceLastPress = currentTime - lastWKeyPressTime;
-            if (timeSinceLastPress < DOUBLE_TAP_TIME) isSprinting = true;
-            lastWKeyPressTime = currentTime;
-        }
-
-        lastWKeyState = pressed;
-        if (!pressed && isSprinting) isSprinting = false;
+    // Sprint with Ctrl key (17 = Ctrl) OR double-tap W
+    if (keyCode == 17) {
+        isSprinting = pressed && keys[87] && !isPlayerInWater() && !isFlying;
+        lastCtrlKeyState = pressed;
     }
 
-    if (keyCode == 83 && pressed) isSprinting = false;
+    // Update sprint state when W is pressed/released
+    if (keyCode == 87) { // W key
+        // Double-tap detection for sprint
+        if (pressed && !lastWKeyState) {
+            float timeSinceLastPress = currentTime - lastWKeyPressTime;
+            if (timeSinceLastPress < DOUBLE_TAP_TIME && !isPlayerInWater() && !isFlying) {
+                isSprinting = true;
+            }
+            lastWKeyPressTime = currentTime;
+        }
+        
+        // Keep sprint active if Ctrl is held
+        if (pressed && lastCtrlKeyState && !isPlayerInWater() && !isFlying) {
+            isSprinting = true;
+        }
+        if (!pressed) {
+            isSprinting = false;
+        }
+        lastWKeyState = pressed;
+    }
+
+    // Cancel sprint on S key
+    if (keyCode == 83 && pressed) {
+        isSprinting = false;
+    }
 }
 
 inline void Game::handleCharInput(char c) {
@@ -133,7 +149,32 @@ inline void Game::handleMouseClick(int button) {
         removeBlock(hit.blockPosition.x, hit.blockPosition.y, hit.blockPosition.z);
     } else if (button == 2) {
         // Right-click: place block
-        placeBlock(hit.adjacentPosition.x, hit.adjacentPosition.y, hit.adjacentPosition.z);
+        // If looking at a plant (flower/tall grass), replace it instead of placing adjacent
+        Block* hitBlock = world.getBlockAt(hit.blockPosition.x, hit.blockPosition.y, hit.blockPosition.z);
+        bool isPlant = hitBlock && (hitBlock->type == BLOCK_TALL_GRASS || 
+                                    hitBlock->type == BLOCK_ORANGE_FLOWER || 
+                                    hitBlock->type == BLOCK_BLUE_FLOWER);
+        
+        if (isPlant) {
+            // Replace the plant with the new block
+            placeBlock(hit.blockPosition.x, hit.blockPosition.y, hit.blockPosition.z);
+        } else {
+            // Place block in the adjacent position as usual
+            placeBlock(hit.adjacentPosition.x, hit.adjacentPosition.y, hit.adjacentPosition.z);
+        }
+    }
+}
+
+inline void Game::handleMouseWheel(double deltaY) {
+    // Don't handle wheel when chat is open
+    if (chatSystem.isChatOpen()) return;
+    
+    // Scroll down (positive deltaY) = next slot
+    // Scroll up (negative deltaY) = previous slot
+    if (deltaY > 0) {
+        hotbarInventory.scrollNext();
+    } else if (deltaY < 0) {
+        hotbarInventory.scrollPrevious();
     }
 }
 

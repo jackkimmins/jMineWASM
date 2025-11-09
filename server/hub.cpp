@@ -40,7 +40,28 @@ void Hub::calculateSafeSpawnPoint() {
         }
     }
     
-    // Second pass: Caves, ores, and surface updates
+    // Second pass: Sand patches and underwater floor normalization
+    for (int dcx = -4; dcx <= 4; ++dcx) {
+        for (int dcz = -4; dcz <= 4; ++dcz) {
+            int cx = spawnChunkX + dcx;
+            int cz = spawnChunkZ + dcz;
+            
+            if (cx < 0 || cx >= WORLD_CHUNK_SIZE_X || cz < 0 || cz >= WORLD_CHUNK_SIZE_Z) continue;
+            
+            // Generate sand patches for lake/ocean floors
+            world.generateSandPatchesForColumn(cx, cz);
+            
+            // Normalize underwater floor to dirt (preserving sand)
+            for (int cy = 0; cy < WORLD_CHUNK_SIZE_Y; ++cy) {
+                Chunk* chunk = world.getChunk(cx, cy, cz);
+                if (chunk && chunk->isGenerated && !chunk->isFullyProcessed) {
+                    world.normaliseUnderwaterFloorToDirt(cx, cy, cz);
+                }
+            }
+        }
+    }
+    
+    // Third pass: Caves, ores, and surface updates
     for (int dcx = -4; dcx <= 4; ++dcx) {
         for (int dcz = -4; dcz <= 4; ++dcz) {
             int cx = spawnChunkX + dcx;
@@ -59,7 +80,7 @@ void Hub::calculateSafeSpawnPoint() {
         }
     }
     
-    // Third pass: Trees and foliage
+    // Fourth pass: Trees and foliage
     for (int dcx = -4; dcx <= 4; ++dcx) {
         for (int dcz = -4; dcz <= 4; ++dcz) {
             int cx = spawnChunkX + dcx;
@@ -331,6 +352,17 @@ void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::st
         
         // Second pass: caves and ores (needs all terrain in place)
         if (columnNeedsGeneration) {
+            // Generate sand patches for lake/ocean floors
+            world.generateSandPatchesForColumn(cx, cz);
+            
+            // Normalize underwater floor to dirt (preserving sand)
+            for (int cy : yLayers) {
+                Chunk* chunk = world.getChunk(cx, cy, cz);
+                if (chunk && chunk->isGenerated && !chunk->isFullyProcessed) {
+                    world.normaliseUnderwaterFloorToDirt(cx, cy, cz);
+                }
+            }
+            
             for (int cy : yLayers) {
                 Chunk* chunk = world.getChunk(cx, cy, cz);
                 if (chunk && chunk->isGenerated && !chunk->isFullyProcessed) {
@@ -538,10 +570,15 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
         else if (typeStr == "STONE") newType = static_cast<uint8_t>(BLOCK_STONE);
         else if (typeStr == "SAND") newType = static_cast<uint8_t>(BLOCK_SAND);
         else if (typeStr == "PLANKS") newType = static_cast<uint8_t>(BLOCK_PLANKS);
+        else if (typeStr == "LOG") newType = static_cast<uint8_t>(BLOCK_LOG);
         else if (typeStr == "LEAVES") newType = static_cast<uint8_t>(BLOCK_LEAVES);
         else if (typeStr == "WATER") newType = static_cast<uint8_t>(BLOCK_WATER);
         else if (typeStr == "COAL_ORE") newType = static_cast<uint8_t>(BLOCK_COAL_ORE);
         else if (typeStr == "IRON_ORE") newType = static_cast<uint8_t>(BLOCK_IRON_ORE);
+        else if (typeStr == "BEDROCK") newType = static_cast<uint8_t>(BLOCK_BEDROCK);
+        else if (typeStr == "COBBLESTONE") newType = static_cast<uint8_t>(BLOCK_COBBLESTONE);
+        else if (typeStr == "GLASS") newType = static_cast<uint8_t>(BLOCK_GLASS);
+        else if (typeStr == "CLAY") newType = static_cast<uint8_t>(BLOCK_CLAY);
         else {
             newType = static_cast<uint8_t>(BLOCK_DIRT); // Default
         }

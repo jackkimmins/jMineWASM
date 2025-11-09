@@ -78,6 +78,13 @@ EM_BOOL mouse_button_callback(int eventType, const EmscriptenMouseEvent *e, void
     return EM_TRUE;
 }
 
+EM_BOOL wheel_callback(int eventType, const EmscriptenWheelEvent *e, void *userData) {
+    if (eventType == EMSCRIPTEN_EVENT_WHEEL && gameInstance->gameState == GameState::PLAYING) {
+        gameInstance->handleMouseWheel(e->deltaY);
+    }
+    return EM_TRUE;
+}
+
 // Main Loop Wrapper
 void main_loop() {
     if (gameInstance) gameInstance->mainLoop();
@@ -113,6 +120,7 @@ int main() {
     emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, key_callback);
     emscripten_set_mousemove_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, mouse_callback);
     emscripten_set_mousedown_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, mouse_button_callback);
+    emscripten_set_wheel_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, wheel_callback);
 
     // Start main loop
     emscripten_set_main_loop(main_loop, 0, 1);

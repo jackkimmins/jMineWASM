@@ -108,11 +108,27 @@ inline void Game::applyPhysics(float dt) {
     if (inWater) {
         // Swimming physics: slow gravity and upward swim on space
         if (keys[32]) {
-            // Swim up
-            player.velocityY = 5.0f; // Upward velocity when holding space
+            // Swim up with constant velocity
+            player.velocityY = SWIM_UP_SPEED;
         } else {
-            // Slowly sink
-            player.velocityY += (GRAVITY * 0.2f) * dt;
+            // Apply reduced gravity when in water
+            player.velocityY += WATER_GRAVITY * dt;
+            // Clamp sink speed
+            if (player.velocityY < -2.0f) {
+                player.velocityY = -2.0f;
+            }
+        }
+
+        // Jump out of water if on surface and space pressed
+        if (keys[32] && !lastSpaceKeyState) {
+            // Check if head is near water surface
+            int headY = static_cast<int>(std::floor(player.y + PLAYER_HEIGHT));
+            int px = static_cast<int>(std::floor(player.x));
+            int pz = static_cast<int>(std::floor(player.z));
+            
+            if (!isWaterBlock(px, headY + 1, pz)) {
+                player.velocityY = WATER_JUMP_VELOCITY;
+            }
         }
 
         float newY = player.y + player.velocityY * dt;
@@ -147,8 +163,49 @@ inline void Game::applyPhysics(float dt) {
         return;
     }
 
+    // Update coyote time
+    if (player.onGround) {
+        coyoteTimeCounter = COYOTE_TIME;
+    } else if (wasOnGroundLastFrame && !player.onGround) {
+        coyoteTimeCounter = COYOTE_TIME;
+    } else if (coyoteTimeCounter > 0.0f) {
+        coyoteTimeCounter -= dt;
+    }
+
+    // Handle jump with buffering and coyote time
+    // Allow continuous jumping when holding space (but not in water)
+    bool canJump = coyoteTimeCounter > 0.0f;
+    
+    if (jumpBufferCounter > 0.0f) {
+        jumpBufferCounter -= dt;
+        
+        // Can jump if either on ground or within coyote time
+        if (canJump) {
+            player.velocityY = JUMP_VELOCITY;
+            player.onGround = false;
+            jumpBufferCounter = 0.0f;
+            coyoteTimeCounter = 0.0f;
+        }
+    }
+    
+    // Continuous jumping - if space is still held and player just landed
+    // But NOT when in water (to prevent bouncing on water surface)
+    if (keys[32] && player.onGround && wasOnGroundLastFrame == false && !inWater) {
+        player.velocityY = JUMP_VELOCITY;
+        player.onGround = false;
+        coyoteTimeCounter = 0.0f;
+    }
+
+    wasOnGroundLastFrame = player.onGround;
+
     // Normal physics
     player.velocityY += GRAVITY * dt;
+    
+    // Terminal velocity
+    if (player.velocityY < -55.0f) {
+        player.velocityY = -55.0f;
+    }
+    
     float newY = player.y + player.velocityY * dt;
 
     if (player.y < -1.0f) {
@@ -170,9 +227,6 @@ inline void Game::applyPhysics(float dt) {
 
         lastPlayerChunkX = static_cast<int>(std::floor(player.x / CHUNK_SIZE));
         lastPlayerChunkZ = static_cast<int>(std::floor(player.z / CHUNK_SIZE));
-
-        // In online-only mode, we do NOT generate chunks locally
-        // The server will send chunk data when we reconnect
 
         lastSafePos = { player.x, player.y, player.z };
         return;
@@ -217,54 +271,137 @@ inline void Game::processInput(float dt) {
         return;
     }
 
-    float baseSpeed = isSprinting ? SPRINT_SPEED : PLAYER_SPEED;
+    // Determine target speed based on state
+    float targetSpeed = PLAYER_SPEED;
     if (isFlying) {
-        baseSpeed = FLY_SPEED;
+        targetSpeed = FLY_SPEED;
         isSprinting = false;
+    } else if (isSprinting && keys[87]) {
+        targetSpeed = SPRINT_SPEED;
     }
-    // Reduce horizontal speed if in water
+    
+    // Reduce speed in water
     if (!isFlying && isPlayerInWater()) {
+        targetSpeed = SWIM_SPEED;
         isSprinting = false;
-        baseSpeed *= 0.5f;
     }
-    float distance = baseSpeed * dt;
 
+    // Calculate camera direction vectors
     float radYaw = camera.yaw * M_PI / 180.0f;
     float frontX = cosf(radYaw);
     float frontZ = sinf(radYaw);
     float rightX = -sinf(radYaw);
     float rightZ = cosf(radYaw);
 
-    float deltaX = 0.0f;
-    float deltaZ = 0.0f;
-
+    // Get input direction (normalized)
+    float inputX = 0.0f;
+    float inputZ = 0.0f;
+    
     if (keys[87]) { // W
-        deltaX += frontX * distance;
-        deltaZ += frontZ * distance;
+        inputX += frontX;
+        inputZ += frontZ;
     }
     if (keys[83]) { // S
-        deltaX -= frontX * distance;
-        deltaZ -= frontZ * distance;
-        isSprinting = false;
+        inputX -= frontX;
+        inputZ -= frontZ;
     }
     if (keys[65]) { // A
-        deltaX -= rightX * distance;
-        deltaZ -= rightZ * distance;
+        inputX -= rightX;
+        inputZ -= rightZ;
     }
     if (keys[68]) { // D
-        deltaX += rightX * distance;
-        deltaZ += rightZ * distance;
+        inputX += rightX;
+        inputZ += rightZ;
     }
 
-    isMoving = (deltaX != 0.0f || deltaZ != 0.0f) && !isFlying;
+    // Normalize input vector
+    float inputLength = sqrtf(inputX * inputX + inputZ * inputZ);
+    if (inputLength > 0.001f) {
+        inputX /= inputLength;
+        inputZ /= inputLength;
+    }
 
-    // In online-only mode, we do NOT generate chunks locally
-    // All chunk data comes from the server
+    // Calculate target velocity
+    float targetVelX = inputX * targetSpeed;
+    float targetVelZ = inputZ * targetSpeed;
 
-    if (!isColliding(player.x + deltaX, player.y, player.z)) player.x += deltaX;
-    if (!isColliding(player.x, player.y, player.z + deltaZ)) player.z += deltaZ;
+    // Choose acceleration and friction based on state
+    float acceleration = player.onGround ? GROUND_ACCELERATION : AIR_ACCELERATION;
+    float friction = player.onGround ? GROUND_FRICTION : (isFlying ? FLY_FRICTION : AIR_FRICTION);
 
-    if (!keys[87] && isSprinting) isSprinting = false;
+    // Apply acceleration toward target velocity
+    if (inputLength > 0.001f) {
+        // Moving - accelerate toward target
+        velocityX += (targetVelX - velocityX) * acceleration * dt;
+        velocityZ += (targetVelZ - velocityZ) * acceleration * dt;
+    } else {
+        // Not moving - apply friction
+        velocityX -= velocityX * friction * dt;
+        velocityZ -= velocityZ * friction * dt;
+        
+        // Stop completely when very slow (prevents tiny movements/bounces)
+        if (fabsf(velocityX) < 0.1f) velocityX = 0.0f;
+        if (fabsf(velocityZ) < 0.1f) velocityZ = 0.0f;
+    }
+
+    // Calculate movement this frame
+    float deltaX = velocityX * dt;
+    float deltaZ = velocityZ * dt;
+
+    isMoving = (fabsf(velocityX) > 0.1f || fabsf(velocityZ) > 0.1f) && !isFlying;
+
+    // Try horizontal movement
+    float newX = player.x + deltaX;
+    float newZ = player.z + deltaZ;
+
+    // Try moving in both directions
+    bool canMoveX = !isColliding(newX, player.y, player.z);
+    bool canMoveZ = !isColliding(player.x, player.y, newZ);
+    bool canMoveBoth = !isColliding(newX, player.y, newZ);
+
+    if (canMoveBoth) {
+        player.x = newX;
+        player.z = newZ;
+    } else {
+        // Try step-up assistance (Minecraft-style)
+        bool stepped = false;
+        if (!isFlying && player.onGround && (fabsf(deltaX) > 0.001f || fabsf(deltaZ) > 0.001f)) {
+            // Try stepping up to STEP_HEIGHT
+            for (float stepY = 0.1f; stepY <= STEP_HEIGHT; stepY += 0.1f) {
+                if (!isColliding(newX, player.y + stepY, newZ)) {
+                    // Can step up here
+                    player.x = newX;
+                    player.z = newZ;
+                    player.y += stepY;
+                    stepped = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!stepped) {
+            // Try sliding along walls
+            if (canMoveX) {
+                player.x = newX;
+                velocityZ *= 0.5f; // Dampen perpendicular velocity
+            }
+            if (canMoveZ) {
+                player.z = newZ;
+                velocityX *= 0.5f; // Dampen perpendicular velocity
+            }
+            
+            // If hit a wall, reduce velocity
+            if (!canMoveX && !canMoveZ) {
+                velocityX *= 0.5f;
+                velocityZ *= 0.5f;
+            }
+        }
+    }
+
+    // Cancel sprint if not moving forward
+    if (!keys[87] && isSprinting) {
+        isSprinting = false;
+    }
 
     if (isFlying) {
         checkGround();

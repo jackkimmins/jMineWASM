@@ -80,6 +80,25 @@ public:
     ChatSystem chatSystem;
     bool chatJustOpened = false;  // Track if chat was just opened to prevent 'T' from appearing
 
+    // Hotbar inventory system
+    HotbarInventory hotbarInventory;
+    
+    // Hotbar rendering
+    Shader* hotbarShader = nullptr;
+    GLuint hotbarVAO = 0, hotbarVBO = 0, hotbarEBO = 0;
+    GLint hotbarMvpLoc;
+
+    // Sky gradient rendering
+    Shader* skyShader = nullptr;
+    GLuint skyVAO = 0, skyVBO = 0;
+    GLint skyViewLoc;
+    GLint skyProjLoc;
+
+    // Particle system
+    ParticleSystem particleSystem;
+    Shader* particleShader = nullptr;
+    GLint particleMvpLoc;
+
     Game();
 
     void init();
@@ -88,6 +107,7 @@ public:
     void handleKey(int keyCode, bool pressed);
     void handleMouseMove(float movementX, float movementY);
     void handleMouseClick(int button);
+    void handleMouseWheel(double deltaY);
     void handleMenuMouseMove(float x, float y);
     void handleMenuClick(float x, float y);
     void handleCharInput(char c);
@@ -109,6 +129,16 @@ private:
     bool isFlying = false;
     bool lastSpaceKeyState = false;
     float lastSpaceKeyPressTime = 0.0f;
+
+    // Improved movement system
+    float velocityX = 0.0f;
+    float velocityZ = 0.0f;
+    float coyoteTimeCounter = 0.0f;          // Time since left ground
+    float jumpBufferCounter = 0.0f;          // Time since jump was pressed
+    bool wasOnGroundLastFrame = false;
+    
+    // Sprint control - Ctrl key
+    bool lastCtrlKeyState = false;
 
     // Menu
     void handleMenuSelection();
@@ -148,6 +178,7 @@ private:
     void render();
     void renderRemotePlayers(const mat4& view);
     void renderUI();
+    void renderHotbar();
 
     // Networking
     void sendHelloMessage();

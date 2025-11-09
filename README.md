@@ -28,12 +28,14 @@ The game is playable via any modern web browser when connected to a server:
 - [x] Tall Grass & Flowers
 - [ ] Flowable Liquids
 - [ ] Mobs (Animals + Hostile)
-- [x] Main Menu
+- [x] Title Screen
 - [ ] Multithreading for World Gen
 - [x] View-frustum Culling
 - [x] Save/Load World (server-side)
 - [ ] Sound Effects
 - [ ] Mobile/Touch Controls
+- [ ] Inventory System
+- [x] Hotbar System
 - [ ] Desktop Version w/ OpenGL
 - [x] Multiplayer Support (w/ WebSockets)
 - [x] Player Chat System

@@ -81,6 +81,9 @@ inline void Game::removeBlock(int x, int y, int z) {
     // Water blocks cannot be destroyed
     if (block->type == BLOCK_WATER) return;
 
+    // Store block type for particles before removing
+    BlockType brokenBlockType = block->type;
+
     // Send edit message to server (online-only game)
     if (netClient.isConnected()) {
         std::ostringstream msg;
@@ -94,7 +97,7 @@ inline void Game::removeBlock(int x, int y, int z) {
         return t == BLOCK_TALL_GRASS || t == BLOCK_ORANGE_FLOWER || t == BLOCK_BLUE_FLOWER;
     };
 
-    // If you directly broke a plant, just clear it
+    // If you directly broke a plant, just clear it (no particles for plants)
     if (isPlant(block->type)) {
         block->isSolid = false;
         block->type = BLOCK_DIRT;
@@ -102,6 +105,10 @@ inline void Game::removeBlock(int x, int y, int z) {
         world.markChunkDirty(cx, cy, cz);
         return;
     }
+
+    // Spawn block breaking particles
+    int textureIndex = meshManager.getTextureIndex(brokenBlockType, FACE_TOP);
+    particleSystem.spawnBlockBreakParticles(x, y, z, brokenBlockType, textureIndex);
 
     // Break the supporting block
     block->isSolid = false;
@@ -122,7 +129,7 @@ inline void Game::removeBlock(int x, int y, int z) {
 inline void Game::placeBlock(int x, int y, int z) {
     Block* block = world.getBlockAt(x, y, z);
     if (!block) return;
-    // Allow placing blocks in water (which replaces the water)
+    // Allow placing blocks in water, plants (flowers/tall grass), or other non-solid blocks
     // Otherwise, the position must not be solid
     if (block->isSolid && block->type != BLOCK_WATER) return;
 
@@ -145,17 +152,40 @@ inline void Game::placeBlock(int x, int y, int z) {
                            (playerMinZ < blockMaxZ && playerMaxZ > blockMinZ);
     if (overlapsPlayer) return;
 
+    // Get the selected block type from inventory
+    BlockType selectedBlockType = hotbarInventory.getSelectedBlockType();
+
+    // Convert BlockType to string for network message
+    const char* blockTypeStr;
+    switch (selectedBlockType) {
+        case BLOCK_STONE:    blockTypeStr = "STONE"; break;
+        case BLOCK_DIRT:     blockTypeStr = "DIRT"; break;
+        case BLOCK_GRASS:    blockTypeStr = "GRASS"; break;
+        case BLOCK_PLANKS:   blockTypeStr = "PLANKS"; break;
+        case BLOCK_LOG:      blockTypeStr = "LOG"; break;
+        case BLOCK_BEDROCK:  blockTypeStr = "BEDROCK"; break;
+        case BLOCK_COAL_ORE: blockTypeStr = "COAL_ORE"; break;
+        case BLOCK_IRON_ORE: blockTypeStr = "IRON_ORE"; break;
+        case BLOCK_LEAVES:   blockTypeStr = "LEAVES"; break;
+        case BLOCK_WATER:    blockTypeStr = "WATER"; break;
+        case BLOCK_SAND:     blockTypeStr = "SAND"; break;
+        case BLOCK_COBBLESTONE: blockTypeStr = "COBBLESTONE"; break;
+        case BLOCK_GLASS:    blockTypeStr = "GLASS"; break;
+        case BLOCK_CLAY:     blockTypeStr = "CLAY"; break;
+        default:             blockTypeStr = "STONE"; break;
+    }
+
     // Send edit message to server (online-only game)
     if (netClient.isConnected()) {
         std::ostringstream msg;
-        msg << "{\"op\":\"edit\",\"kind\":\"place\",\"w\":[" << x << "," << y << "," << z << "],\"type\":\"PLANKS\"}";
+        msg << "{\"op\":\"edit\",\"kind\":\"place\",\"w\":[" << x << "," << y << "," << z << "],\"type\":\"" << blockTypeStr << "\"}";
         netClient.send(msg.str());
-        std::cout << "[GAME] Sent place edit: " << x << "," << y << "," << z << std::endl;
+        std::cout << "[GAME] Sent place edit: " << x << "," << y << "," << z << " with type " << blockTypeStr << std::endl;
     }
 
     // Apply optimistically
     block->isSolid = true;
-    block->type = BLOCK_PLANKS;
+    block->type = selectedBlockType;
 
     int cx = x / CHUNK_SIZE;
     int cy = y / CHUNK_HEIGHT;

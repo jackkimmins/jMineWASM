@@ -103,7 +103,18 @@ $(CLIENT_BUILD) $(SERVER_BUILD):
 # --- Convenience
 clean:
 	@echo "Cleaning build artifacts..."
+	@# If world_save exists, move it aside temporarily
+	@if [ -e "$(SERVER_BUILD)/world_save" ]; then \
+	  echo "Preserving $(SERVER_BUILD)/world_save"; \
+	  mv "$(SERVER_BUILD)/world_save" "$(BUILD_DIR).world_save"; \
+	fi
+	@# Remove the whole build directory
 	rm -rf "$(BUILD_DIR)"
+	@# Restore world_save into the (new) server build dir if we saved it
+	@if [ -e "$(BUILD_DIR).world_save" ]; then \
+	  mkdir -p "$(SERVER_BUILD)"; \
+	  mv "$(BUILD_DIR).world_save" "$(SERVER_BUILD)/world_save"; \
+	fi
 	@echo "Clean complete"
 
 # Start from build/server so world saves land there; serve build/client

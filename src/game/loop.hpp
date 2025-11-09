@@ -14,6 +14,9 @@ inline void Game::mainLoop() {
         if (isMoving) bobbingTime += deltaTime;
         updateHighlightedBlock();
 
+        // Update particles
+        particleSystem.update(deltaTime);
+
         // Send pose updates at 10 Hz
         if (netClient.isConnected()) {
             lastPoseSendTime += deltaTime;

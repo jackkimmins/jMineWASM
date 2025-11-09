@@ -34,7 +34,10 @@ enum BlockType {
     BLOCK_SAND,
     BLOCK_TALL_GRASS,
     BLOCK_ORANGE_FLOWER,
-    BLOCK_BLUE_FLOWER
+    BLOCK_BLUE_FLOWER,
+    BLOCK_COBBLESTONE,
+    BLOCK_GLASS,
+    BLOCK_CLAY
 };
 
 // Face Direction for rendering
