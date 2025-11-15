@@ -1,5 +1,4 @@
 // server/hub.cpp
-// Hub implementation for client management and protocol handling
 #include "hub.hpp"
 #include <algorithm>
 #include <filesystem>

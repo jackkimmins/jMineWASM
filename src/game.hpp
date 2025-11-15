@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <iostream>
 
-// Split headers (game logic lives under game/)
 #include "game/state.hpp"
 #include "game/remote_player.hpp"
 #include "game/core.hpp"
