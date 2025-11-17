@@ -50,9 +50,7 @@ EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *user
         bool pressed = eventType == EMSCRIPTEN_EVENT_KEYDOWN;
         gameInstance->handleKey(e->keyCode, pressed);
         
-        // Handle character input for chat when chat is open and key is pressed
         if (pressed && gameInstance->chatSystem.isChatOpen() && e->key[0] != '\0' && e->key[1] == '\0') {
-            // Single character key (not special keys like "Enter", "Shift", etc.)
             char c = e->key[0];
             if (c >= 32 && c <= 126) {  // Printable ASCII
                 gameInstance->handleCharInput(c);
@@ -63,7 +61,6 @@ EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *user
 }
 
 EM_BOOL mouse_callback(int eventType, const EmscriptenMouseEvent *e, void *userData) {
-    // Only handle mouse movement during gameplay, not in menu
     if (eventType == EMSCRIPTEN_EVENT_MOUSEMOVE && gameInstance->gameState == GameState::PLAYING) {
         gameInstance->handleMouseMove(static_cast<float>(e->movementX), static_cast<float>(e->movementY));
     }
@@ -71,7 +68,6 @@ EM_BOOL mouse_callback(int eventType, const EmscriptenMouseEvent *e, void *userD
 }
 
 EM_BOOL mouse_button_callback(int eventType, const EmscriptenMouseEvent *e, void *userData) {
-    // Only handle mouse clicks during gameplay, not in menu
     if (eventType == EMSCRIPTEN_EVENT_MOUSEDOWN && gameInstance->gameState == GameState::PLAYING) {
         gameInstance->handleMouseClick(e->button);
     }
@@ -100,14 +96,12 @@ int main() {
     attr.antialias = true;
     attr.majorVersion = 2;
 
-    // Create WebGL 2.0 context
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = emscripten_webgl_create_context("canvas", &attr);
     if(ctx <= 0) {
         std::cerr << "Failed to create WebGL context" << std::endl;
         return -1;
     }
 
-    // Make context current
     emscripten_webgl_make_context_current(ctx);
 
     // Initialise Game instance

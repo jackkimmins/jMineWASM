@@ -97,7 +97,10 @@
 
 		Module = {
 			preRun: [function() {
-				ENV.GAME_WS_URL = "ws://10.0.10.15:8888/ws";
+				const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+				const host = window.location.hostname;
+				const port = '8888';
+				ENV.GAME_WS_URL = `${protocol}//${host}:${port}/ws`;
 			}]
 		};
 	</script>
