@@ -39,10 +39,7 @@ public:
 Game* gameInstance = nullptr;
 
 // Extern Functions
-extern "C" void setPointerLocked(bool locked) {
-    if (gameInstance) gameInstance->pointerLocked = locked;
-}
-
+extern "C" void setPointerLocked(bool locked) { if (gameInstance) gameInstance->pointerLocked = locked; }
 
 // Callback Functions
 EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *userData) {

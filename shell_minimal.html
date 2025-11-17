@@ -99,8 +99,9 @@
 			preRun: [function() {
 				const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 				const host = window.location.hostname;
-				const port = '8888';
-				ENV.GAME_WS_URL = `${protocol}//${host}:${port}/ws`;
+				const isProduction = window.location.protocol === 'https:';
+				const port = isProduction ? '' : ':8888';
+				ENV.GAME_WS_URL = `${protocol}//${host}${port}/ws`;
 			}]
 		};
 	</script>
