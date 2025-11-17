@@ -138,8 +138,9 @@ inline void Game::handleMouseMove(float movementX, float movementY) {
 }
 
 inline void Game::handleMouseClick(int button) {
-    // Don't handle clicks when chat is open
+    // Don't handle clicks when chat is open or when not pointer locked
     if (chatSystem.isChatOpen()) return;
+    if (!pointerLocked) return;
     
     float maxDistance = 4.5f;
     RaycastHit hit = raycast(maxDistance);

@@ -497,6 +497,7 @@ public:
             case BLOCK_COBBLESTONE: return 18;
             case BLOCK_GLASS:    return 19;
             case BLOCK_CLAY:     return 20;
+            case BLOCK_SNOW:     return 21;
             default:             return 0;
         }
     }

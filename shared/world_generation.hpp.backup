@@ -16,10 +16,10 @@
 #include "perlin_noise.hpp"
 
 // Mountain Generation Constants
-constexpr int TREE_LINE_HEIGHT = 60;           // No new trees above this height
-constexpr int SNOW_TRANSITION_START = 61;      // Grass/dirt starts fading out, stone appears
-constexpr int SNOW_FADE_START = 65;            // Snow begins to appear
-constexpr int FULL_SNOW_HEIGHT = 77;           // Full snow coverage above this
+constexpr int TREE_LINE_HEIGHT = 55;           // No new trees above this height
+constexpr int SNOW_TRANSITION_START = 58;      // Grass/dirt starts fading out, stone appears
+constexpr int SNOW_FADE_START = 62;            // Snow begins to appear
+constexpr int FULL_SNOW_HEIGHT = 68;           // Full snow coverage above this
 
 // Fallback for std::lerp if not available
 namespace {
@@ -717,13 +717,7 @@ public:
 
                     if (worldY <= columnHeight && worldY < WORLD_SIZE_Y) {
                         block.isSolid = true;
-                        // Mountain peaks (above transition start) should be all stone
-                        // Only generate dirt layers on lower terrain
-                        if (columnHeight >= SNOW_TRANSITION_START) {
-                            // High mountains - all stone
-                            block.type = BLOCK_STONE;
-                        } else if (worldY >= columnHeight - 3) {
-                            // Normal terrain - dirt on top
+                        if (worldY >= columnHeight - 3) {
                             block.type = BLOCK_DIRT;
                         } else {
                             block.type = BLOCK_STONE;
@@ -983,10 +977,8 @@ public:
 
                 // ===== MOUNTAIN PEAK SNOW LOGIC =====
                 // Calculate the snow/stone transition based on height
-                // We use multiple noise layers for more natural variation
-                double transitionNoise = perlin.noise(worldX * 0.08, worldY * 0.12, worldZ * 0.08) * 0.5 + 0.5; // [0,1]
-                double detailNoise = perlin.noise(worldX * 0.25, worldY * 0.3, worldZ * 0.25) * 0.5 + 0.5; // [0,1]
-                double combinedNoise = (transitionNoise * 0.7 + detailNoise * 0.3);
+                // We use a deterministic noise value for variation in the transition
+                double transitionNoise = perlin.noise(worldX * 0.15, worldY * 0.1, worldZ * 0.15) * 0.5 + 0.5; // [0,1]
                 
                 // Full snow zone (above FULL_SNOW_HEIGHT)
                 if (worldY >= FULL_SNOW_HEIGHT) {
@@ -997,17 +989,11 @@ public:
                 // Snow fade-in zone (SNOW_FADE_START to FULL_SNOW_HEIGHT)
                 else if (worldY >= SNOW_FADE_START) {
                     // Calculate probability of snow vs stone based on height
-                    double heightFactor = (worldY - SNOW_FADE_START) / (double)(FULL_SNOW_HEIGHT - SNOW_FADE_START);
-                    heightFactor = std::clamp(heightFactor, 0.0, 1.0);
+                    double snowProbability = (worldY - SNOW_FADE_START) / (double)(FULL_SNOW_HEIGHT - SNOW_FADE_START);
+                    snowProbability = std::clamp(snowProbability, 0.0, 1.0);
                     
-                    // Combine height with noise for natural variation (heavy noise influence)
-                    double snowProbability = heightFactor * 0.4 + combinedNoise * 0.6;
-                    
-                    // Add some vertical variation - offset the threshold based on noise
-                    double noiseOffset = (combinedNoise - 0.5) * 6.0; // +/- 3 blocks variation
-                    double adjustedHeight = worldY + noiseOffset;
-                    
-                    if (adjustedHeight >= SNOW_FADE_START + (FULL_SNOW_HEIGHT - SNOW_FADE_START) * (1.0 - combinedNoise * 0.5)) {
+                    // Add noise variation to make it more natural
+                    if (transitionNoise < snowProbability) {
                         if (topBlock.type == BLOCK_STONE || topBlock.type == BLOCK_DIRT || topBlock.type == BLOCK_GRASS) {
                             topBlock.type = BLOCK_SNOW;
                         }
@@ -1020,17 +1006,11 @@ public:
                 // Grass fade-out zone (SNOW_TRANSITION_START to SNOW_FADE_START)
                 else if (worldY >= SNOW_TRANSITION_START) {
                     // Calculate probability of stone vs grass/dirt based on height
-                    double heightFactor = (worldY - SNOW_TRANSITION_START) / (double)(SNOW_FADE_START - SNOW_TRANSITION_START);
-                    heightFactor = std::clamp(heightFactor, 0.0, 1.0);
+                    double stoneProbability = (worldY - SNOW_TRANSITION_START) / (double)(SNOW_FADE_START - SNOW_TRANSITION_START);
+                    stoneProbability = std::clamp(stoneProbability, 0.0, 1.0);
                     
-                    // Heavy noise influence for natural patches
-                    double stoneProbability = heightFactor * 0.5 + combinedNoise * 0.5;
-                    
-                    // Add vertical noise offset
-                    double noiseOffset = (combinedNoise - 0.5) * 4.0; // +/- 2 blocks variation
-                    double adjustedHeight = worldY + noiseOffset;
-                    
-                    if (adjustedHeight >= SNOW_TRANSITION_START + (SNOW_FADE_START - SNOW_TRANSITION_START) * (1.0 - combinedNoise * 0.4)) {
+                    // Add noise variation
+                    if (transitionNoise < stoneProbability) {
                         if (topBlock.type == BLOCK_DIRT || topBlock.type == BLOCK_GRASS) {
                             topBlock.type = BLOCK_STONE;
                         }
@@ -1046,7 +1026,7 @@ public:
                 }
 
                 // Convert layers below surface
-                // For normal terrain (below mountain transition) - grass with dirt underneath
+                // For normal terrain (below mountain transition)
                 if (worldY < SNOW_TRANSITION_START && topBlock.type == BLOCK_GRASS) {
                     for (int i = 1; i <= 2; ++i) {
                         int yBelow = topYLocal - i;
@@ -1073,9 +1053,9 @@ public:
                         b.type = BLOCK_STONE;
                     }
                 }
-                // For mountain peaks with snow - thin snow layer on solid stone
+                // For mountain peaks with snow
                 else if (worldY >= SNOW_FADE_START && topBlock.type == BLOCK_SNOW) {
-                    // Very thin snow layer (1-2 blocks), directly on stone
+                    // 1-2 layers of snow below the surface snow block
                     for (int i = 1; i <= 2; ++i) {
                         int yBelow = topYLocal - i;
                         if (yBelow < 0) break;
@@ -1085,39 +1065,23 @@ public:
                             b.type != BLOCK_WATER &&
                             b.type != BLOCK_LOG &&
                             b.type != BLOCK_LEAVES) {
-                            // Very thin snow accumulation
+                            // Mix of snow and stone based on depth and noise
                             double snowDepthNoise = perlin.noise(worldX * 0.2, (worldY - i) * 0.15, worldZ * 0.2) * 0.5 + 0.5;
-                            if (i == 1 && snowDepthNoise > 0.4) {
+                            if (i == 1 || snowDepthNoise > 0.3) {
                                 b.type = BLOCK_SNOW;
                             } else {
                                 b.type = BLOCK_STONE;
                             }
                         }
                     }
-                    // Everything else is stone
-                    for (int i = 3; i <= 12; ++i) {
+                    // Rest is stone
+                    for (int i = 3; i <= 8; ++i) {
                         int yDeep = topYLocal - i;
                         if (yDeep < 0) break;
                         Block& b = chunk->blocks[x][yDeep][z];
                         if (!b.isSolid) break;
                         if (b.type == BLOCK_LOG || b.type == BLOCK_LEAVES) break;
-                        // Convert any dirt or grass to stone
-                        if (b.type == BLOCK_DIRT || b.type == BLOCK_GRASS || b.type == BLOCK_SNOW) {
-                            b.type = BLOCK_STONE;
-                        }
-                    }
-                }
-                // For mountain transition zones with exposed stone - also no dirt
-                else if (worldY >= SNOW_TRANSITION_START && topBlock.type == BLOCK_STONE) {
-                    // Mountain stone surfaces should be solid stone underneath
-                    for (int i = 1; i <= 12; ++i) {
-                        int yDeep = topYLocal - i;
-                        if (yDeep < 0) break;
-                        Block& b = chunk->blocks[x][yDeep][z];
-                        if (!b.isSolid) break;
-                        if (b.type == BLOCK_LOG || b.type == BLOCK_LEAVES) break;
-                        // Convert any dirt or grass to stone
-                        if (b.type == BLOCK_DIRT || b.type == BLOCK_GRASS) {
+                        if (b.type == BLOCK_SNOW) {
                             b.type = BLOCK_STONE;
                         }
                     }

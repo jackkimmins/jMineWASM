@@ -99,6 +99,11 @@ public:
     Shader* particleShader = nullptr;
     GLint particleMvpLoc;
 
+    // Crosshair rendering
+    Shader* crosshairShader = nullptr;
+    GLuint crosshairVAO = 0, crosshairVBO = 0;
+    GLint crosshairProjLoc;
+
     Game();
 
     void init();
@@ -179,6 +184,7 @@ private:
     void renderRemotePlayers(const mat4& view);
     void renderUI();
     void renderHotbar();
+    void renderCrosshair();
 
     // Networking
     void sendHelloMessage();

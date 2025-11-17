@@ -35,5 +35,6 @@
 #include "game/network.hpp"
 #include "game/chat.hpp"
 #include "game/hotbar.hpp"
+#include "game/crosshair.hpp"
 
 #endif // GAME_HPP

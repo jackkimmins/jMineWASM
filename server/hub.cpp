@@ -578,6 +578,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
         else if (typeStr == "COBBLESTONE") newType = static_cast<uint8_t>(BLOCK_COBBLESTONE);
         else if (typeStr == "GLASS") newType = static_cast<uint8_t>(BLOCK_GLASS);
         else if (typeStr == "CLAY") newType = static_cast<uint8_t>(BLOCK_CLAY);
+        else if (typeStr == "SNOW") newType = static_cast<uint8_t>(BLOCK_SNOW);
         else {
             newType = static_cast<uint8_t>(BLOCK_DIRT); // Default
         }

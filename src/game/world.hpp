@@ -172,6 +172,7 @@ inline void Game::placeBlock(int x, int y, int z) {
         case BLOCK_COBBLESTONE: blockTypeStr = "COBBLESTONE"; break;
         case BLOCK_GLASS:    blockTypeStr = "GLASS"; break;
         case BLOCK_CLAY:     blockTypeStr = "CLAY"; break;
+        case BLOCK_SNOW:     blockTypeStr = "SNOW"; break;
         default:             blockTypeStr = "STONE"; break;
     }
 

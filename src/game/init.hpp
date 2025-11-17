@@ -390,6 +390,7 @@ inline void Game::init() {
     // Slot 5: Cobblestone
     // Slot 6: Glass
     // Slot 7: Clay
+    // Slot 8: Snow
     hotbarInventory.setSlot(0, BLOCK_STONE);
     hotbarInventory.setSlot(1, BLOCK_DIRT);
     hotbarInventory.setSlot(2, BLOCK_GRASS);
@@ -398,6 +399,7 @@ inline void Game::init() {
     hotbarInventory.setSlot(5, BLOCK_COBBLESTONE);
     hotbarInventory.setSlot(6, BLOCK_GLASS);
     hotbarInventory.setSlot(7, BLOCK_CLAY);
+    hotbarInventory.setSlot(8, BLOCK_SNOW);
     hotbarInventory.selectSlot(3);
 
     // Create hotbar shader for rendering 3D block previews
@@ -566,6 +568,32 @@ inline void Game::init() {
     particleMvpLoc = particleShader->getUniform("uMVP");
 
     std::cout << "Particle system initialized" << std::endl;
+
+    // Create crosshair shader (using inverted colors for visibility)
+    const char* crosshairVertexSrc = R"(#version 300 es
+            precision mediump float;
+            layout(location = 0) in vec2 aPos;
+            uniform mat4 uProjection;
+            void main() {
+                gl_Position = uProjection * vec4(aPos, 0.0, 1.0);
+            })";
+
+    const char* crosshairFragmentSrc = R"(#version 300 es
+            precision mediump float;
+            out vec4 FragColor;
+            void main() {
+                // White color - we'll use blend mode for inversion
+                FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+            })";
+
+    crosshairShader = new Shader(crosshairVertexSrc, crosshairFragmentSrc);
+    crosshairProjLoc = crosshairShader->getUniform("uProjection");
+
+    // Setup crosshair VAO/VBO
+    glGenVertexArrays(1, &crosshairVAO);
+    glGenBuffers(1, &crosshairVBO);
+
+    std::cout << "Crosshair initialized" << std::endl;
 
     lastFrame = std::chrono::steady_clock::now();
 }

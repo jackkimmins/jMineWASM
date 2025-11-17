@@ -268,9 +268,9 @@ inline void Game::renderUI() {
 
         // Render pause overlay when not pointer locked
         if (!pointerLocked) {
-            // Darken the screen
-            textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 0.5f);
-
+            // Lightly dim the screen
+            textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 0.6f);
+            
             // Display "PAUSED" in center
             float centerY = height / 2.0f - 30.0f;
             textRenderer.drawTextCentered("PAUSED", centerY, 5.0f, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -285,6 +285,11 @@ inline void Game::renderUI() {
         
         // Render hotbar
         renderHotbar();
+        
+        // Render crosshair (only when pointer is locked and not in chat)
+        if (pointerLocked && !chatSystem.isChatOpen()) {
+            renderCrosshair();
+        }
     }
 
     // Restore OpenGL state for 3D rendering

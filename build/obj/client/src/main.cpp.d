@@ -12,7 +12,7 @@ build/obj/client/src/main.cpp.o: src/main.cpp src/stb_image.h \
   src/game/init.hpp src/game/loop.hpp src/game/input.hpp \
   src/game/menu.hpp src/game/world.hpp src/game/physics.hpp \
   src/game/raycast.hpp src/game/render.hpp src/game/network.hpp \
-  src/game/chat.hpp src/game/hotbar.hpp
+  src/game/chat.hpp src/game/hotbar.hpp src/game/crosshair.hpp
 src/stb_image.h:
 src/../shared/config.hpp:
 src/../shared/types.hpp:
@@ -51,3 +51,4 @@ src/game/render.hpp:
 src/game/network.hpp:
 src/game/chat.hpp:
 src/game/hotbar.hpp:
+src/game/crosshair.hpp:

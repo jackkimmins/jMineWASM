@@ -281,12 +281,17 @@ public:
 
     // Draw screen overlay (for darkening the screen)
     void drawOverlay(float r, float g, float b, float alpha) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        
         overlayShader->use();
         glUniform4f(overlayColorLoc, r, g, b, alpha);
 
         glBindVertexArray(overlayVAO);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
+        
+        glDisable(GL_BLEND);
     }
     
     // Draw a rectangle at specified screen coordinates
