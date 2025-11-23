@@ -47,10 +47,13 @@ EM_BOOL key_callback(int eventType, const EmscriptenKeyboardEvent *e, void *user
         bool pressed = eventType == EMSCRIPTEN_EVENT_KEYDOWN;
         gameInstance->handleKey(e->keyCode, pressed);
         
-        if (pressed && gameInstance->chatSystem.isChatOpen() && e->key[0] != '\0' && e->key[1] == '\0') {
+        // Handle character input for chat or username input
+        if (pressed && e->key[0] != '\0' && e->key[1] == '\0') {
             char c = e->key[0];
             if (c >= 32 && c <= 126) {  // Printable ASCII
-                gameInstance->handleCharInput(c);
+                if (gameInstance->chatSystem.isChatOpen() || gameInstance->gameState == GameState::USERNAME_INPUT) {
+                    gameInstance->handleCharInput(c);
+                }
             }
         }
     }

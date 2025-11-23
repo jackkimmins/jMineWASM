@@ -3,7 +3,9 @@
 
 inline void Game::sendHelloMessage() {
     std::ostringstream json;
-    json << "{\"op\":\"" << ClientOp::HELLO << "\",\"proto\":" << PROTOCOL_VERSION << "}";
+    json << "{\"op\":\"" << ClientOp::HELLO << "\""
+         << ",\"proto\":" << PROTOCOL_VERSION
+         << ",\"username\":\"" << usernameInput << "\"}";
     netClient.send(json.str());
 }
 
@@ -47,6 +49,8 @@ inline void Game::handleServerMessage(const std::string& message) {
 
     if (op == ServerOp::HELLO_OK) {
         handleHelloOk(message);
+    } else if (op == ServerOp::AUTH_ERROR) {
+        handleAuthError(message);
     } else if (op == ServerOp::CHUNK_FULL) {
         handleChunkFull(message);
     } else if (op == ServerOp::CHUNK_UNLOAD) {
@@ -65,14 +69,14 @@ inline void Game::handleServerMessage(const std::string& message) {
 }
 
 inline void Game::handleHelloOk(const std::string& message) {
-    // Parse: {"op":"hello_ok","client_id":"client1", ... , "spawn":[x,y,z]}
-    size_t clientIdPos = message.find("\"client_id\":\"");
-    if (clientIdPos != std::string::npos) {
-        size_t idStart = clientIdPos + 13;  // Length of "client_id":""
-        size_t idEnd = message.find("\"", idStart);
-        if (idEnd != std::string::npos) {
-            myClientId = message.substr(idStart, idEnd - idStart);
-            std::cout << "[GAME] ✓ Server accepted hello (my ID: " << myClientId << ")" << std::endl;
+    // Parse: {"op":"hello_ok","username":"Player1", ... , "spawn":[x,y,z]}
+    size_t usernamePos = message.find("\"username\":\"");
+    if (usernamePos != std::string::npos) {
+        size_t usernameStart = usernamePos + 12;  // Length of "username":""
+        size_t usernameEnd = message.find("\"", usernameStart);
+        if (usernameEnd != std::string::npos) {
+            myUsername = message.substr(usernameStart, usernameEnd - usernameStart);
+            std::cout << "[GAME] ✓ Server accepted authentication (username: " << myUsername << ")" << std::endl;
         }
     } else {
         std::cout << "[GAME] ✓ Server accepted hello" << std::endl;
@@ -405,7 +409,7 @@ inline void Game::handlePlayerSnapshot(const std::string& message) {
             }
 
             // Skip ourselves (safety check - server should already exclude us)
-            if (!myClientId.empty() && playerId == myClientId) {
+            if (!myUsername.empty() && playerId == myUsername) {
                 pos = objEnd + 1;
                 continue;
             }
@@ -473,6 +477,30 @@ inline void Game::handleSystemMessage(const std::string& message) {
     
     std::cout << "[SYSTEM] " << msgText << std::endl;
     chatSystem.addSystemMessage(msgText);
+}
+
+inline void Game::handleAuthError(const std::string& message) {
+    // Parse: {"op":"auth_error","reason":"username_taken","message":"Username 'Player1' is already in use"}
+    size_t messagePos = message.find("\"message\":\"");
+    std::string errorMsg = "Authentication failed";
+    
+    if (messagePos != std::string::npos) {
+        size_t msgStart = messagePos + 11;  // Length of "message":"
+        size_t msgEnd = message.find("\"", msgStart);
+        if (msgEnd != std::string::npos) {
+            errorMsg = message.substr(msgStart, msgEnd - msgStart);
+        }
+    }
+    
+    std::cerr << "[GAME] Authentication error: " << errorMsg << std::endl;
+    
+    // Disconnect from server to allow reconnection
+    netClient.disconnect();
+    
+    // Return to username input screen with error
+    gameState = GameState::USERNAME_INPUT;
+    usernameError = errorMsg;
+    loadingStatus = "Authentication failed";
 }
 
 #endif // GAME_NETWORK_HPP

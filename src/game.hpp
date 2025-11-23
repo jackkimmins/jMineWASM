@@ -28,6 +28,7 @@
 #include "game/loop.hpp"
 #include "game/input.hpp"
 #include "game/menu.hpp"
+#include "game/username_input.hpp"
 #include "game/world.hpp"
 #include "game/physics.hpp"
 #include "game/raycast.hpp"

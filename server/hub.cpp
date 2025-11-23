@@ -7,11 +7,8 @@
 
 void Hub::addClient(std::shared_ptr<ClientSession> client) {
     std::lock_guard<std::mutex> lock(clientsMutex);
-    std::string clientId = "client" + std::to_string(nextClientId++);
-    clients[client] = clientId;
-    std::cout << "[HUB] Added " << clientId << " (total: " << clients.size() << ")" << std::endl;
-    
-    // Don't broadcast join message here - wait until after hello_ok is sent
+    // Client will be added to the maps after successful username authentication
+    std::cout << "[HUB] New client connected (awaiting authentication)" << std::endl;
 }
 
 void Hub::calculateSafeSpawnPoint() {
@@ -112,20 +109,23 @@ void Hub::calculateSafeSpawnPoint() {
 }
 
 void Hub::removeClient(std::shared_ptr<ClientSession> client) {
-    std::string clientId;
+    std::string username;
     {
         std::lock_guard<std::mutex> lock(clientsMutex);
         auto it = clients.find(client);
         if (it != clients.end()) {
-            clientId = it->second;
-            std::cout << "[HUB] Removed " << it->second << std::endl;
+            username = it->second;
+            std::cout << "[HUB] Removed " << username << std::endl;
+            
+            // Remove from both maps
+            usernameToClient.erase(username);
             clients.erase(it);
         }
     }
     
     // Broadcast leave message if client was known
-    if (!clientId.empty()) {
-        broadcastSystemMessage(clientId + " left the server");
+    if (!username.empty()) {
+        broadcastSystemMessage(username + " left the server");
     }
 }
 
@@ -214,20 +214,60 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
         return;
     }
     
-    // Get this client's ID
-    std::string clientId;
-    {
-        std::lock_guard<std::mutex> lock(clientsMutex);
-        auto it = clients.find(client);
-        if (it != clients.end()) {
-            clientId = it->second;
+    // Extract username from hello message
+    size_t usernamePos = message.find("\"username\":\"");
+    std::string username;
+    if (usernamePos != std::string::npos) {
+        size_t usernameStart = usernamePos + 12;  // Length of "username":""
+        size_t usernameEnd = message.find("\"", usernameStart);
+        if (usernameEnd != std::string::npos) {
+            username = message.substr(usernameStart, usernameEnd - usernameStart);
         }
     }
     
-    // Send hello_ok with client ID
+    // Validate username
+    if (username.empty()) {
+        std::cerr << "[HUB] No username provided - rejecting" << std::endl;
+        std::ostringstream error;
+        error << "{\"op\":\"" << ServerOp::AUTH_ERROR << "\""
+              << ",\"reason\":\"missing_username\""
+              << ",\"message\":\"Username is required\"}";
+        client->send(error.str());
+        return;
+    }
+    
+    if (!isValidUsername(username)) {
+        std::cerr << "[HUB] Invalid username: " << username << " - rejecting" << std::endl;
+        std::ostringstream error;
+        error << "{\"op\":\"" << ServerOp::AUTH_ERROR << "\""
+              << ",\"reason\":\"invalid_username\""
+              << ",\"message\":\"Username must be 1-16 alphanumeric characters\"}";
+        client->send(error.str());
+        return;
+    }
+    
+    if (isUsernameTaken(username)) {
+        std::cerr << "[HUB] Username already taken: " << username << " - rejecting" << std::endl;
+        std::ostringstream error;
+        error << "{\"op\":\"" << ServerOp::AUTH_ERROR << "\""
+              << ",\"reason\":\"username_taken\""
+              << ",\"message\":\"Username '" << username << "' is already in use\"}";
+        client->send(error.str());
+        return;
+    }
+    
+    // Register the client with their username
+    {
+        std::lock_guard<std::mutex> lock(clientsMutex);
+        clients[client] = username;
+        usernameToClient[username] = client;
+        std::cout << "[HUB] Authenticated " << username << " (total: " << clients.size() << ")" << std::endl;
+    }
+    
+    // Send hello_ok with username
     std::ostringstream response;
     response << "{\"op\":\"" << ServerOp::HELLO_OK << "\""
-             << ",\"client_id\":\"" << clientId << "\""
+             << ",\"username\":\"" << username << "\""
              << ",\"server_version\":\"1.0.0\""
              << ",\"proto\":" << PROTOCOL_VERSION
              << ",\"seed\":" << PERLIN_SEED
@@ -237,7 +277,7 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
              << "}";
     
     std::string responseStr = response.str();
-    std::cout << "[HUB] → hello_ok (client_id: " << clientId << ", spawn: [" << spawnX << "," << spawnY << "," << spawnZ << "])" << std::endl;
+    std::cout << "[HUB] → hello_ok (username: " << username << ", spawn: [" << spawnX << "," << spawnY << "," << spawnZ << "])" << std::endl;
     client->send(responseStr);
     
     // Send welcome messages to the new client
@@ -245,7 +285,7 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
     sendSystemMessage(client, "Press T to open chat");
     
     // Broadcast join message to all clients
-    broadcastSystemMessage(clientId + " joined the server");
+    broadcastSystemMessage(username + " joined the server");
 }
 
 void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::string& message) {
@@ -891,7 +931,7 @@ void Hub::broadcastPlayerSnapshot() {
     // Send personalized snapshot to each client (excluding themselves)
     for (const auto& receiverEntry : clients) {
         auto receiverClient = receiverEntry.first;
-        const std::string& receiverClientId = receiverEntry.second;
+        const std::string& receiverUsername = receiverEntry.second;
         
         // Build player snapshot message for this specific client
         std::ostringstream json;
@@ -900,7 +940,7 @@ void Hub::broadcastPlayerSnapshot() {
         bool first = true;
         for (const auto& playerEntry : clients) {
             auto playerClient = playerEntry.first;
-            const std::string& playerClientId = playerEntry.second;
+            const std::string& playerUsername = playerEntry.second;
             
             // Skip the receiving client (don't send themselves)
             if (playerClient == receiverClient) {
@@ -910,7 +950,7 @@ void Hub::broadcastPlayerSnapshot() {
             if (!first) json << ",";
             first = false;
             
-            json << "{\"id\":\"" << playerClientId << "\""
+            json << "{\"id\":\"" << playerUsername << "\""
                  << ",\"x\":" << playerClient->lastPoseX
                  << ",\"y\":" << playerClient->lastPoseY
                  << ",\"z\":" << playerClient->lastPoseZ
@@ -940,25 +980,25 @@ void Hub::handleChat(std::shared_ptr<ClientSession> client, const std::string& m
     if (msgEnd == std::string::npos) return;
     std::string msgText = message.substr(msgStart, msgEnd - msgStart);
     
-    // Get sender's client ID
-    std::string senderId;
+    // Get sender's username
+    std::string username;
     {
         std::lock_guard<std::mutex> lock(clientsMutex);
         auto it = clients.find(client);
         if (it != clients.end()) {
-            senderId = it->second;
+            username = it->second;
         }
     }
     
-    if (senderId.empty()) {
-        std::cerr << "[HUB] Cannot send chat message from unknown client" << std::endl;
+    if (username.empty()) {
+        std::cerr << "[HUB] Cannot send chat message from unauthenticated client" << std::endl;
         return;
     }
     
-    std::cout << "[CHAT] " << senderId << ": " << msgText << std::endl;
+    std::cout << "[CHAT] " << username << ": " << msgText << std::endl;
     
     // Broadcast to all clients
-    broadcastChatMessage(senderId, msgText);
+    broadcastChatMessage(username, msgText);
 }
 
 void Hub::broadcastChatMessage(const std::string& sender, const std::string& message) {
@@ -996,4 +1036,25 @@ void Hub::sendSystemMessage(std::shared_ptr<ClientSession> client, const std::st
          << ",\"message\":\"" << message << "\"}";
     
     client->send(json.str());
+}
+
+bool Hub::isValidUsername(const std::string& username) const {
+    // Check length
+    if (username.empty() || username.length() > MAX_USERNAME_LENGTH) {
+        return false;
+    }
+    
+    // Check characters (only alphanumeric)
+    for (char c : username) {
+        if (!std::isalnum(static_cast<unsigned char>(c))) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool Hub::isUsernameTaken(const std::string& username) {
+    std::lock_guard<std::mutex> lock(clientsMutex);
+    return usernameToClient.find(username) != usernameToClient.end();
 }

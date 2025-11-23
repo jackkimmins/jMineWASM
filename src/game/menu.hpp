@@ -5,28 +5,12 @@ inline void Game::handleMenuSelection() {
     std::cout << "[MENU] Selected: " << selectedMenuOption << std::endl;
 
     if (selectedMenuOption == MENU_PLAY_ONLINE) {
-        std::cout << "[MENU] Starting online game..." << std::endl;
+        std::cout << "[MENU] Transitioning to username input..." << std::endl;
 
-        // Check if we can connect
-        const char* wsUrl = std::getenv("GAME_WS_URL");
-        if (!wsUrl || wsUrl[0] == '\0') {
-            std::cerr << "[MENU] No GAME_WS_URL set, cannot start online game" << std::endl;
-            loadingStatus = "Error: No server URL configured";
-            return;
-        }
-
-        // Transition to connecting state
-        gameState = GameState::CONNECTING;
-        loadingStatus = "Connecting to server...";
-
-        // Connect to server
-        if (netClient.connect(wsUrl)) {
-            std::cout << "[GAME] Waiting for connection..." << std::endl;
-        } else {
-            std::cerr << "[GAME] Failed to connect" << std::endl;
-            gameState = GameState::DISCONNECTED;
-            loadingStatus = "Connection failed";
-        }
+        // Transition to username input state
+        gameState = GameState::USERNAME_INPUT;
+        usernameInput = "";
+        usernameError = "";
     }
     else if (selectedMenuOption == MENU_SETTINGS) {
         std::cout << "[MENU] Settings not yet implemented" << std::endl;

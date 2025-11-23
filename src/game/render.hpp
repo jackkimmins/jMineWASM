@@ -221,6 +221,8 @@ inline void Game::renderUI() {
     // Handle different game states
     if (gameState == GameState::MAIN_MENU) {
         renderMainMenu(width, height);
+    } else if (gameState == GameState::USERNAME_INPUT) {
+        renderUsernameInput(width, height);
     } else if (gameState == GameState::LOADING || gameState == GameState::CONNECTING || gameState == GameState::WAITING_FOR_WORLD) {
         // Full screen black background for loading
         textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 1.0f);

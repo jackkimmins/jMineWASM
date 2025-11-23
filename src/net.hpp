@@ -88,6 +88,19 @@ public:
         onDisconnectCallback = callback;
     }
     
+    // Disconnect from server
+    void disconnect() {
+#ifdef __EMSCRIPTEN__
+        if (socket) {
+            std::cout << "[NET] Disconnecting..." << std::endl;
+            emscripten_websocket_close(socket, 1000, "Client disconnect");
+            emscripten_websocket_delete(socket);
+            socket = 0;
+            connected = false;
+        }
+#endif
+    }
+    
     bool isConnected() const {
         return connected;
     }

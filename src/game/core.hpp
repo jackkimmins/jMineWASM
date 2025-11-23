@@ -42,7 +42,7 @@ public:
 
     // Network client
     NetworkClient netClient;
-    std::string myClientId = "";  // Our client ID from server
+    std::string myUsername = "";  // Our username from server authentication
     int lastInterestChunkX = -9999;
     int lastInterestChunkZ = -9999;
     std::unordered_map<ChunkCoord, int> chunkRevisions; // Track revisions for reconciliation
@@ -75,6 +75,11 @@ public:
     GLint menuTexLoc;
     GLint menuScrollLoc;
     float menuScrollOffset = 0.0f;
+    
+    // Username input state
+    std::string usernameInput = "";
+    std::string usernameError = "";
+    bool lastBackspaceKeyState = false;
 
     // Chat system
     ChatSystem chatSystem;
@@ -148,6 +153,10 @@ private:
     // Menu
     void handleMenuSelection();
     void renderMainMenu(int width, int height);
+    void renderUsernameInput(int width, int height);
+    void handleUsernameInputKey(int keyCode, bool pressed);
+    void handleUsernameCharInput(char c);
+    void submitUsername();
 
     // Timing
     float calculateDeltaTime();
@@ -193,6 +202,7 @@ private:
     void sendChatMessage(const std::string& message);
     void handleServerMessage(const std::string& message);
     void handleHelloOk(const std::string& message);
+    void handleAuthError(const std::string& message);
     void handleChunkFull(const std::string& message);
     void handleChunkUnload(const std::string& message);
     void handleBlockUpdate(const std::string& message);

@@ -30,6 +30,12 @@ inline void Game::handleKey(int keyCode, bool pressed) {
         }
         return; // Don't process other keys in menu
     }
+    
+    // Handle username input
+    if (gameState == GameState::USERNAME_INPUT) {
+        handleUsernameInputKey(keyCode, pressed);
+        return; // Don't process other keys in username input
+    }
 
     // Handle chat input
     if (chatSystem.isChatOpen()) {
@@ -114,6 +120,12 @@ inline void Game::handleKey(int keyCode, bool pressed) {
 }
 
 inline void Game::handleCharInput(char c) {
+    // Handle username input
+    if (gameState == GameState::USERNAME_INPUT) {
+        handleUsernameCharInput(c);
+        return;
+    }
+    
     // Only handle character input when chat is open
     if (chatSystem.isChatOpen()) {
         // If chat was just opened, skip this character (to prevent 'T' from appearing)

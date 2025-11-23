@@ -59,6 +59,10 @@ public:
     
     World& getWorld() { return world; }
     
+    // Username validation
+    bool isValidUsername(const std::string& username) const;
+    bool isUsernameTaken(const std::string& username);
+    
     // World persistence
     void saveWorld();
     void loadWorld();
@@ -74,8 +78,8 @@ public:
 private:
     World world;
     std::mutex clientsMutex;
-    std::unordered_map<std::shared_ptr<ClientSession>, std::string> clients; // client -> id
-    int nextClientId = 1;
+    std::unordered_map<std::shared_ptr<ClientSession>, std::string> clients; // client -> username
+    std::unordered_map<std::string, std::shared_ptr<ClientSession>> usernameToClient; // username -> client
     std::string worldSaveDir;
     
     // Spawn point coordinates
