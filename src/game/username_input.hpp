@@ -52,17 +52,21 @@ inline void Game::renderUsernameInput(int width, int height) {
     // Title
     textRenderer.drawTextCentered("Enter Your Username", 100.0f, 6.0f, 1.0f, 1.0f, 1.0f, 1.0f);
 
-    // Instructions
-    textRenderer.drawTextCentered("Username: 1-16 alphanumeric characters", 180.0f, 2.5f, 0.8f, 0.8f, 0.8f, 0.9f);
-
-    // Input box background (semi-transparent dark rectangle)
+    // Input box background (Minecraft-style)
     float inputBoxY = 280.0f;
     float inputBoxWidth = 600.0f;
-    float inputBoxHeight = 80.0f;
+    float inputBoxHeight = 60.0f;
     float inputBoxX = (width - inputBoxWidth) / 2.0f;
 
-    // Draw input box border (highlighted)
-    float borderThickness = 4.0f;
+    // Draw Minecraft-style text input box with 3-layer border
+    // Layer 1: Outer border (light gray - top/left highlight)
+    textRenderer.drawRect(inputBoxX - 2.0f, inputBoxY - 2.0f, inputBoxWidth + 4.0f, inputBoxHeight + 4.0f,  0.63f, 0.63f, 0.63f, 1.0f);
+    
+    // Layer 2: Middle border (dark gray/black shadow)
+    textRenderer.drawRect(inputBoxX - 1.0f, inputBoxY - 1.0f, inputBoxWidth + 2.0f, inputBoxHeight + 2.0f, 0.25f, 0.25f, 0.25f, 1.0f);
+    
+    // Layer 3: Inner background (very dark gray)
+    textRenderer.drawRect(inputBoxX, inputBoxY, inputBoxWidth, inputBoxHeight, 0.16f, 0.16f, 0.16f, 1.0f);
     
     // Draw the username text or cursor
     std::string displayText = usernameInput;
@@ -73,7 +77,7 @@ inline void Game::renderUsernameInput(int width, int height) {
     }
     
     float textScale = 4.0f;
-    textRenderer.drawTextCentered(displayText, inputBoxY + 25.0f, textScale, 1.0f, 1.0f, 1.0f, 1.0f);
+    textRenderer.drawTextCentered(displayText, inputBoxY + 18.0f, textScale, 1.0f, 1.0f, 1.0f, 1.0f);
 
     // Error message (if any)
     if (!usernameError.empty()) {
@@ -162,6 +166,18 @@ inline void Game::submitUsername() {
         usernameError = "No server URL configured!";
         return;
     }
+    
+    // Save server address for display (extract hostname from ws:// or wss:// URL)
+    serverAddress = wsUrl;
+    // Remove ws:// or wss:// prefix for cleaner display
+    if (serverAddress.find("ws://") == 0) {
+        serverAddress = serverAddress.substr(5);
+    } else if (serverAddress.find("wss://") == 0) {
+        serverAddress = serverAddress.substr(6);
+    }
+    
+    // Save username to localStorage for future use
+    saveUsernameToStorage(usernameInput);
     
     // Clear error and transition to connecting state
     usernameError = "";

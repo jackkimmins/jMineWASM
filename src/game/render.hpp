@@ -252,20 +252,39 @@ inline void Game::renderUI() {
     } else if (gameState == GameState::PLAYING) {
         // Normal gameplay UI
 
-        // Render connection status in top-left corner
+        // Render status info in top-left corner
         if (gameState == GameState::PLAYING) {
-            std::string statusText;
-            float r = 1.0f, g = 1.0f, b = 1.0f;
-
+            // Enable blending for transparent background
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            
+            // Draw dark background panel behind status text
+            float padding = 8.0f;
+            float panelX = 0.0f;
+            float panelY = 0.0f;
+            float panelWidth = 300.0f;  // Adjust based on expected text width
+            float panelHeight = 60.0f;  // Height for 2 lines of text
+            textRenderer.drawRect(panelX, panelY, panelWidth, panelHeight, 0.0f, 0.0f, 0.0f, 0.4f);
+            
+            glDisable(GL_BLEND);
+            
+            // Line 1: Game name and version
+            std::string gameName = "jMineWASM - V1.4";
+            textRenderer.drawText(gameName, 10.0f, 10.0f, 2.0f, 1.0f, 1.0f, 1.0f, 0.9f);
+            
+            // Line 2: Server address and player count
+            int currentPlayers = remotePlayers.size() + 1; // +1 for local player
+            std::string serverInfo = serverAddress + " " + std::to_string(currentPlayers) + "/" + std::to_string(maxPlayers);
+            
+            // Color based on connection status
+            float r, g, b;
             if (netClient.isConnected()) {
-                statusText = "CONNECTED";
                 r = 0.3f; g = 1.0f; b = 0.3f; // Green
             } else {
-                statusText = "DISCONNECTED";
                 r = 1.0f; g = 0.3f; b = 0.3f; // Red
             }
-
-            textRenderer.drawText(statusText, 10.0f, 10.0f, 2.0f, r, g, b, 0.9f);
+            
+            textRenderer.drawText(serverInfo, 10.0f, 35.0f, 1.8f, r, g, b, 0.85f);
         }
 
         // Render pause overlay when not pointer locked
@@ -275,11 +294,12 @@ inline void Game::renderUI() {
             
             // Display "PAUSED" in center
             float centerY = height / 2.0f - 30.0f;
-            textRenderer.drawTextCentered("PAUSED", centerY, 5.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+            textRenderer.drawTextCentered("GAME PAUSED", centerY, 5.0f, 1.0f, 1.0f, 1.0f, 1.0f);
 
             // Display instructions
             float instructionY = centerY + 60.0f;
             textRenderer.drawTextCentered("Click to resume", instructionY, 2.0f, 0.8f, 0.8f, 0.8f, 0.9f);
+            textRenderer.drawTextCentered("Press Q to quit to main menu", instructionY + 40.0f, 1.8f, 0.7f, 0.7f, 0.7f, 0.8f);
         }
         
         // Render chat (always render when in playing state)

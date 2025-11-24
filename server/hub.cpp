@@ -1,5 +1,6 @@
 // server/hub.cpp
 #include "hub.hpp"
+#include "logger.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -8,13 +9,13 @@
 void Hub::addClient(std::shared_ptr<ClientSession> client) {
     std::lock_guard<std::mutex> lock(clientsMutex);
     // Client will be added to the maps after successful username authentication
-    std::cout << "[HUB] New client connected (awaiting authentication)" << std::endl;
+    Logger::hub("New client connected (awaiting authentication)");
 }
 
 void Hub::calculateSafeSpawnPoint() {
     const int MIN_DISTANCE_FROM_WATER = 5;
     
-    std::cout << "[HUB] Calculating safe spawn point (min " << MIN_DISTANCE_FROM_WATER << " blocks from water)..." << std::endl;
+    Logger::hub("Calculating safe spawn point (min " + std::to_string(MIN_DISTANCE_FROM_WATER) + " blocks from water)...");
     
     // Load chunks around the default spawn area
     int spawnChunkX = static_cast<int>(SPAWN_X) / CHUNK_SIZE;
@@ -99,9 +100,9 @@ void Hub::calculateSafeSpawnPoint() {
     
     // Try to find a safe spawn point
     if (world.findSafeSpawnPoint(SPAWN_X, SPAWN_Z, MIN_DISTANCE_FROM_WATER, spawnX, spawnY, spawnZ)) {
-        std::cout << "[HUB] Safe spawn point found at (" << spawnX << ", " << spawnY << ", " << spawnZ << ")" << std::endl;
+        Logger::hub("Safe spawn point found at (" + std::to_string(spawnX) + ", " + std::to_string(spawnY) + ", " + std::to_string(spawnZ) + ")");
     } else {
-        std::cout << "[HUB] Warning: Could not find safe spawn point away from water, using default" << std::endl;
+        Logger::hub("Warning: Could not find safe spawn point away from water, using default");
         spawnX = SPAWN_X;
         spawnY = SPAWN_Y;
         spawnZ = SPAWN_Z;
@@ -115,7 +116,7 @@ void Hub::removeClient(std::shared_ptr<ClientSession> client) {
         auto it = clients.find(client);
         if (it != clients.end()) {
             username = it->second;
-            std::cout << "[HUB] Removed " << username << std::endl;
+            Logger::hub("Removed " + username);
             
             // Remove from both maps
             usernameToClient.erase(username);
@@ -133,19 +134,19 @@ void Hub::handleMessage(std::shared_ptr<ClientSession> client, const std::string
     // Simple JSON parsing - extract "op" field
     size_t opPos = message.find("\"op\":");
     if (opPos == std::string::npos) {
-        std::cerr << "[HUB] Invalid message: no op field" << std::endl;
+        Logger::error("Invalid message: no op field");
         return;
     }
     
     size_t opStart = message.find("\"", opPos + 5);
     size_t opEnd = message.find("\"", opStart + 1);
     if (opStart == std::string::npos || opEnd == std::string::npos) {
-        std::cerr << "[HUB] Invalid message: malformed op" << std::endl;
+        Logger::error("Invalid message: malformed op");
         return;
     }
     
     std::string op = message.substr(opStart + 1, opEnd - opStart - 1);
-    // std::cout << "[HUB] Handling op: " << op << std::endl;
+    // Logger::hub("Handling op: " << op << std::endl;
     
     if (op == ClientOp::HELLO) {
         handleHello(client, message);
@@ -181,7 +182,7 @@ void Hub::handleMessage(std::shared_ptr<ClientSession> client, const std::string
     } else if (op == ClientOp::CHAT) {
         handleChat(client, message);
     } else {
-        std::cerr << "[HUB] Unknown op: " << op << std::endl;
+        Logger::error("Unknown op: " + op);
     }
 }
 
@@ -196,12 +197,12 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
         clientProto = std::stoi(protoStr);
     }
     
-    std::cout << "[HUB] Client hello (proto: " << clientProto << ")" << std::endl;
+    Logger::hub("Client hello (proto: " + std::to_string(clientProto) + ")");
     
     // Protocol version gating
     if (clientProto != PROTOCOL_VERSION) {
-        std::cerr << "[HUB] Protocol mismatch: client=" << clientProto 
-                  << ", server=" << PROTOCOL_VERSION << " - rejecting" << std::endl;
+        Logger::error("Protocol mismatch: client=" + std::to_string(clientProto) + 
+                     ", server=" + std::to_string(PROTOCOL_VERSION) + " - rejecting");
         std::ostringstream error;
         error << "{\"op\":\"error\""
               << ",\"reason\":\"protocol_mismatch\""
@@ -227,7 +228,7 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
     
     // Validate username
     if (username.empty()) {
-        std::cerr << "[HUB] No username provided - rejecting" << std::endl;
+        Logger::error("No username provided - rejecting");
         std::ostringstream error;
         error << "{\"op\":\"" << ServerOp::AUTH_ERROR << "\""
               << ",\"reason\":\"missing_username\""
@@ -237,7 +238,7 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
     }
     
     if (!isValidUsername(username)) {
-        std::cerr << "[HUB] Invalid username: " << username << " - rejecting" << std::endl;
+        Logger::error("Invalid username: " + username + " - rejecting");
         std::ostringstream error;
         error << "{\"op\":\"" << ServerOp::AUTH_ERROR << "\""
               << ",\"reason\":\"invalid_username\""
@@ -247,7 +248,7 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
     }
     
     if (isUsernameTaken(username)) {
-        std::cerr << "[HUB] Username already taken: " << username << " - rejecting" << std::endl;
+        Logger::error("Username already taken: " + username + " - rejecting");
         std::ostringstream error;
         error << "{\"op\":\"" << ServerOp::AUTH_ERROR << "\""
               << ",\"reason\":\"username_taken\""
@@ -261,7 +262,7 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
         std::lock_guard<std::mutex> lock(clientsMutex);
         clients[client] = username;
         usernameToClient[username] = client;
-        std::cout << "[HUB] Authenticated " << username << " (total: " << clients.size() << ")" << std::endl;
+        Logger::hub("Authenticated " + username + " (total: " + std::to_string(clients.size()) + ")");
     }
     
     // Send hello_ok with username
@@ -277,11 +278,14 @@ void Hub::handleHello(std::shared_ptr<ClientSession> client, const std::string& 
              << "}";
     
     std::string responseStr = response.str();
-    std::cout << "[HUB] → hello_ok (username: " << username << ", spawn: [" << spawnX << "," << spawnY << "," << spawnZ << "])" << std::endl;
+    Logger::hub("→ hello_ok (username: " + username + ", spawn: [" + 
+               std::to_string(spawnX) + "," + std::to_string(spawnY) + "," + std::to_string(spawnZ) + "])");
     client->send(responseStr);
     
     // Send welcome messages to the new client
-    sendSystemMessage(client, "Welcome to jMineWASM Multiplayer!");
+    if (!serverMotd.empty()) {
+        sendSystemMessage(client, serverMotd);
+    }
     sendSystemMessage(client, "Press T to open chat");
     
     // Broadcast join message to all clients
@@ -298,7 +302,7 @@ void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::st
     size_t bracketEnd = message.find("]", comma);
     
     if (bracketStart == std::string::npos || comma == std::string::npos || bracketEnd == std::string::npos) {
-        std::cerr << "[HUB] Malformed center array" << std::endl;
+        Logger::error("Malformed center array");
         return;
     }
     
@@ -314,7 +318,7 @@ void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::st
         radius = std::stoi(message.substr(radiusStart, radiusEnd - radiusStart));
     }
     
-    // std::cout << "[HUB] Set interest: center=(" << cx << "," << cz << "), radius=" << radius << std::endl;
+    // Logger::hub("Set interest: center=(" << cx << "," << cz << "), radius=" << radius << std::endl;
     
     // Calculate new AOI
     std::unordered_set<ChunkCoord, std::hash<ChunkCoord>> newAOI;
@@ -353,7 +357,7 @@ void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::st
         }
     }
     
-    // std::cout << "[HUB] AOI delta: +" << toAdd.size() << " -" << toRemove.size() << std::endl;
+    // Logger::hub("AOI delta: +" << toAdd.size() << " -" << toRemove.size() << std::endl;
     
     // Group chunks by column (cx, cz) to ensure proper generation order
     std::map<std::pair<int, int>, std::vector<int>> columnChunks; // (cx,cz) -> [cy values]
@@ -453,7 +457,7 @@ void Hub::handleSetInterest(std::shared_ptr<ClientSession> client, const std::st
 void Hub::sendChunkFull(std::shared_ptr<ClientSession> client, int cx, int cy, int cz) {
     Chunk* chunk = world.getChunk(cx, cy, cz);
     if (!chunk || !chunk->isGenerated) {
-        std::cerr << "[HUB] Chunk not generated: " << cx << "," << cy << "," << cz << std::endl;
+        Logger::error("Chunk not generated: " + std::to_string(cx) + "," + std::to_string(cy) + "," + std::to_string(cz));
         return;
     }
     
@@ -468,8 +472,8 @@ void Hub::sendChunkFull(std::shared_ptr<ClientSession> client, int cx, int cy, i
     if (chunkCache.count(cacheKey) > 0) {
         // Cache hit!
         base64Data = chunkCache[cacheKey];
-        // std::cout << "[HUB] → chunk_full(" << cx << "," << cy << "," << cz 
-        //           << ") [CACHED, rev=" << rev << "]" << std::endl;
+        // Logger::hub("→ chunk_full(" << cx << "," << cy << "," << cz 
+        //           << ") [CACHED, rev=" << rev << "]");
     } else {
         // Cache miss - serialize
         const int totalBlocks = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE;
@@ -494,9 +498,9 @@ void Hub::sendChunkFull(std::shared_ptr<ClientSession> client, int cx, int cy, i
         // Store in cache
         chunkCache[cacheKey] = base64Data;
         
-        // std::cout << "[HUB] → chunk_full(" << cx << "," << cy << "," << cz 
+        // Logger::hub("→ chunk_full(" << cx << "," << cy << "," << cz 
         //           << ") [" << base64Data.length() << " chars, " << encoded.size() 
-        //           << " bytes RLE, rev=" << rev << "]" << std::endl;
+        //           << " bytes RLE, rev=" << rev << "]");
     }
     
     // Send chunk_full message
@@ -521,7 +525,7 @@ void Hub::sendChunkUnload(std::shared_ptr<ClientSession> client, int cx, int cy,
              << "}";
     
     std::string responseStr = response.str();
-    // std::cout << "[HUB] → chunk_unload(" << cx << "," << cy << "," << cz << ")" << std::endl;
+    // Logger::hub("→ chunk_unload(" << cx << "," << cy << "," << cz << ")");
     client->send(responseStr);
 }
 
@@ -533,7 +537,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     client->lastEditTime = now;
     
     if (client->editTokens < 1) {
-        std::cerr << "[HUB] Edit rate limit exceeded for client" << std::endl;
+        Logger::error("Edit rate limit exceeded for client");
         return;
     }
     client->editTokens--;
@@ -544,7 +548,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     size_t typePos = message.find("\"type\":");
     
     if (kindPos == std::string::npos || wPos == std::string::npos) {
-        std::cerr << "[HUB] Invalid edit message" << std::endl;
+        Logger::error("Invalid edit message");
         return;
     }
     
@@ -560,19 +564,19 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     
     int wx, wy, wz;
     if (sscanf(wArray.c_str(), "%d,%d,%d", &wx, &wy, &wz) != 3) {
-        std::cerr << "[HUB] Invalid coordinates in edit" << std::endl;
+        Logger::error("Invalid coordinates in edit");
         return;
     }
     
     // Validate bounds
     if (wx < 0 || wx >= WORLD_SIZE_X || wy < 0 || wy >= WORLD_SIZE_Y || wz < 0 || wz >= WORLD_SIZE_Z) {
-        std::cerr << "[HUB] Edit out of bounds: " << wx << "," << wy << "," << wz << std::endl;
+        Logger::error("Edit out of bounds: " + std::to_string(wx) + "," + std::to_string(wy) + "," + std::to_string(wz));
         return;
     }
     
     // Forbid breaking bedrock (y=0)
     if (kind == "remove" && wy == 0) {
-        std::cerr << "[HUB] Cannot break bedrock" << std::endl;
+        Logger::error("Cannot break bedrock");
         return;
     }
     
@@ -582,7 +586,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     float dz = wz - client->lastPoseZ;
     float distSq = dx*dx + dy*dy + dz*dz;
     if (distSq > 36.0f) { // 6*6
-        std::cerr << "[HUB] Edit too far from player: dist=" << std::sqrt(distSq) << std::endl;
+        Logger::error("Edit too far from player: dist=" + std::to_string(std::sqrt(distSq)));
         return;
     }
     
@@ -596,7 +600,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     } else if (kind == "place") {
         // Extract block type
         if (typePos == std::string::npos) {
-            std::cerr << "[HUB] Place edit missing type" << std::endl;
+            Logger::error("Place edit missing type");
             return;
         }
         size_t typeStart = message.find("\"", typePos + 7);
@@ -624,7 +628,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
         }
         newSolid = true;
     } else {
-        std::cerr << "[HUB] Unknown edit kind: " << kind << std::endl;
+        Logger::error("Unknown edit kind: " + kind);
         return;
     }
     
@@ -635,7 +639,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     
     const Block* oldBlock = world.getBlockAt(wx, wy, wz);
     if (!oldBlock) {
-        std::cerr << "[HUB] Block not in loaded chunk" << std::endl;
+        Logger::error("Block not in loaded chunk");
         return;
     }
     
@@ -681,11 +685,7 @@ void Hub::handleEdit(std::shared_ptr<ClientSession> client, const std::string& m
     // Mark chunk as modified for saving
     markChunkModified(cx, cy, cz);
     
-    std::cout << "[HUB] Edit applied: " << kind << " at (" << wx << "," << wy << "," << wz 
-              << ") type=" << (int)newType << " rev=" << chunkRevisions[coord] << std::endl;
-    
-    // Broadcast to all clients in AOI
-    broadcastBlockUpdate(wx, wy, wz, newType, newSolid);
+    Logger::hub("Edit applied: " + kind + " at (" + std::to_string(wx) + "," + std::to_string(wy) + "," + std::to_string(wz) + ") -> " + std::to_string((int)newType));
 }
 
 void Hub::broadcastBlockUpdate(int wx, int wy, int wz, uint8_t blockType, bool isSolid) {
@@ -719,8 +719,7 @@ void Hub::broadcastBlockUpdate(int wx, int wy, int wz, uint8_t blockType, bool i
         }
     }
     
-    std::cout << "[HUB] Broadcast block_update(" << wx << "," << wy << "," << wz 
-              << ") to clients in AOI of chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
+    Logger::hub("Broadcast block_update(" + std::to_string(wx) + "," + std::to_string(wy) + "," + std::to_string(wz) + ") -> " + std::to_string((int)blockType));
 }
 
 void Hub::markChunkModified(int cx, int cy, int cz) {
@@ -730,11 +729,11 @@ void Hub::markChunkModified(int cx, int cy, int cz) {
 
 void Hub::saveWorld() {
     if (modifiedChunks.empty()) {
-        std::cout << "[HUB] No modified chunks to save" << std::endl;
+        Logger::hub("No modified chunks to save");
         return;
     }
     
-    std::cout << "[HUB] Saving " << modifiedChunks.size() << " modified chunks..." << std::endl;
+    Logger::hub("Saving " + std::to_string(modifiedChunks.size()) + " modified chunks...");
     
     // Create save directory if it doesn't exist
     std::filesystem::create_directories(worldSaveDir);
@@ -755,7 +754,7 @@ void Hub::saveWorld() {
         // Open file for binary writing
         std::ofstream file(filename.str(), std::ios::binary);
         if (!file) {
-            std::cerr << "[HUB] Failed to open " << filename.str() << " for writing" << std::endl;
+            Logger::error("Failed to open " + filename.str() + " for writing");
             continue;
         }
         
@@ -777,7 +776,7 @@ void Hub::saveWorld() {
         savedCount++;
     }
     
-    std::cout << "[HUB] Saved " << savedCount << " chunks to " << worldSaveDir << std::endl;
+    Logger::hub("Saved " + std::to_string(savedCount) + " chunks to " + worldSaveDir);
 }
 
 bool Hub::loadChunkIfSaved(int cx, int cy, int cz) {
@@ -793,7 +792,7 @@ bool Hub::loadChunkIfSaved(int cx, int cy, int cz) {
     // Open file for binary reading
     std::ifstream file(filepath, std::ios::binary);
     if (!file) {
-        std::cerr << "[HUB] Failed to open " << filepath << " for reading" << std::endl;
+        Logger::error("Failed to open " + filepath + " for reading");
         return false;
     }
     
@@ -818,7 +817,7 @@ bool Hub::loadChunkIfSaved(int cx, int cy, int cz) {
                 file.read(reinterpret_cast<char*>(&solidVal), sizeof(solidVal));
                 
                 if (!file) {
-                    std::cerr << "[HUB] Incomplete chunk data in " << filepath << std::endl;
+                    Logger::error("Incomplete chunk data in " + filepath);
                     file.close();
                     return false;
                 }
@@ -836,17 +835,17 @@ bool Hub::loadChunkIfSaved(int cx, int cy, int cz) {
         chunkRevisions[coord] = 0;
     }
     
-    std::cout << "[HUB] Loaded saved chunk (" << cx << "," << cy << "," << cz << ") from disk" << std::endl;
+    Logger::hub("Loaded saved chunk (" + std::to_string(cx) + "," + std::to_string(cy) + "," + std::to_string(cz) + ") from disk");
     return true;
 }
 
 void Hub::loadWorld() {
     if (!std::filesystem::exists(worldSaveDir)) {
-        std::cout << "[HUB] No saved world found at " << worldSaveDir << std::endl;
+        Logger::hub("No saved world found at " + worldSaveDir);
         return;
     }
     
-    std::cout << "[HUB] Loading saved world from " << worldSaveDir << "..." << std::endl;
+    Logger::hub("Loading saved world from " + worldSaveDir + "...");
     
     int loadedCount = 0;
     for (const auto& entry : std::filesystem::directory_iterator(worldSaveDir)) {
@@ -878,7 +877,7 @@ void Hub::loadWorld() {
         // Open file for binary reading
         std::ifstream file(entry.path(), std::ios::binary);
         if (!file) {
-            std::cerr << "[HUB] Failed to open " << entry.path() << " for reading" << std::endl;
+            Logger::error("Failed to open " + entry.path().string() + " for reading");
             continue;
         }
         
@@ -900,7 +899,7 @@ void Hub::loadWorld() {
                     file.read(reinterpret_cast<char*>(&solidVal), sizeof(solidVal));
                     
                     if (!file) {
-                        std::cerr << "[HUB] Incomplete chunk data in " << filename << std::endl;
+                        Logger::error("Incomplete chunk data in " + filename);
                         goto next_file;
                     }
                     
@@ -918,7 +917,7 @@ void Hub::loadWorld() {
         file.close();
     }
     
-    std::cout << "[HUB] Loaded " << loadedCount << " chunks from disk" << std::endl;
+    Logger::hub("Loaded " + std::to_string(loadedCount) + " chunks from disk");
 }
 
 void Hub::broadcastPlayerSnapshot() {
@@ -970,7 +969,7 @@ void Hub::handleChat(std::shared_ptr<ClientSession> client, const std::string& m
     // Parse: {"op":"chat","message":"Hello world!"}
     size_t messagePos = message.find("\"message\":\"");
     if (messagePos == std::string::npos) {
-        std::cerr << "[HUB] Invalid chat message format" << std::endl;
+        Logger::error("Invalid chat message format");
         return;
     }
     
@@ -991,11 +990,11 @@ void Hub::handleChat(std::shared_ptr<ClientSession> client, const std::string& m
     }
     
     if (username.empty()) {
-        std::cerr << "[HUB] Cannot send chat message from unauthenticated client" << std::endl;
+        Logger::error("Cannot send chat message from unauthenticated client");
         return;
     }
     
-    std::cout << "[CHAT] " << username << ": " << msgText << std::endl;
+    Logger::chat(username, msgText);
     
     // Broadcast to all clients
     broadcastChatMessage(username, msgText);

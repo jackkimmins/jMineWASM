@@ -37,6 +37,12 @@ inline void Game::handleKey(int keyCode, bool pressed) {
         return; // Don't process other keys in username input
     }
 
+    // Handle Q key to quit to main menu when paused (pointer not locked)
+    if (keyCode == 81 && pressed && !pointerLocked && gameState == GameState::PLAYING) { // Q key
+        returnToMainMenu();
+        return;
+    }
+    
     // Handle chat input
     if (chatSystem.isChatOpen()) {
         if (keyCode == 13 && pressed) { // Enter - send message

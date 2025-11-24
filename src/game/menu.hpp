@@ -9,8 +9,14 @@ inline void Game::handleMenuSelection() {
 
         // Transition to username input state
         gameState = GameState::USERNAME_INPUT;
-        usernameInput = "";
+        
+        // Load previously saved username from localStorage
+        usernameInput = loadUsernameFromStorage();
         usernameError = "";
+        
+        if (!usernameInput.empty()) {
+            std::cout << "[MENU] Loaded saved username: " << usernameInput << std::endl;
+        }
     }
     else if (selectedMenuOption == MENU_SETTINGS) {
         std::cout << "[MENU] Settings not yet implemented" << std::endl;

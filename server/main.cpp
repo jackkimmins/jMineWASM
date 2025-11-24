@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <optional>
 #include "hub.hpp"
+#include "server_config.hpp"
+#include "logger.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -68,13 +70,13 @@ private:
         }
         
         if (ec) {
-            std::cerr << "[HTTP] Read error: " << ec.message() << std::endl;
+            Logger::error("HTTP read error: " + ec.message());
             return;
         }
         
         // Check for WebSocket upgrade
         if (websocket::is_upgrade(req_)) {
-            std::cout << "[HTTP] WebSocket upgrade request" << std::endl;
+            Logger::http("WebSocket upgrade request");
             
             // Create WebSocket session and pass the request for handshake
             auto ws = std::make_shared<ClientSession>(std::move(socket_), hub_);
@@ -93,7 +95,7 @@ private:
         }
         
         std::string path = root_ + target;
-        std::cout << "[HTTP] GET " << req_.target() << " -> " << path << std::endl;
+        Logger::http("GET " + std::string(req_.target()) + " -> " + path);
         
         // Check if file exists
         beast::error_code ec;
@@ -114,7 +116,7 @@ private:
         }
         
         if (ec) {
-            std::cerr << "[HTTP] File error: " << ec.message() << std::endl;
+            Logger::error("HTTP file error: " + ec.message());
             string_response_.emplace(http::status::internal_server_error, req_.version());
             auto& res = *string_response_;
             res.set(http::field::server, "jMineWASM-Server");
@@ -147,25 +149,25 @@ private:
         (void)bytes_transferred;
         
         if (ec) {
-            std::cerr << "[HTTP] Write error: " << ec.message() << std::endl;
+            Logger::error("HTTP write error: " + ec.message());
             return;
         }
         
         if (close) {
-            std::cout << "[HTTP] Closing connection" << std::endl;
+            Logger::http("Closing connection");
             return do_close();
         }
         
-        std::cout << "[HTTP] Keeping connection alive, reading next request" << std::endl;
+        Logger::http("Keeping connection alive, reading next request");
         do_read();
     }
     
     void do_close() {
-        std::cout << "[HTTP] do_close() called" << std::endl;
+        Logger::http("do_close() called");
         beast::error_code ec;
         socket_.shutdown(tcp::socket::shutdown_send, ec);
         if (ec) {
-            std::cerr << "[HTTP] Shutdown error: " << ec.message() << std::endl;
+            Logger::error("HTTP shutdown error: " + ec.message());
         }
     }
 };
@@ -179,25 +181,25 @@ public:
         
         acceptor_.open(endpoint.protocol(), ec);
         if (ec) {
-            std::cerr << "[LISTENER] Open error: " << ec.message() << std::endl;
+            Logger::error("Listener open error: " + ec.message());
             return;
         }
         
         acceptor_.set_option(net::socket_base::reuse_address(true), ec);
         if (ec) {
-            std::cerr << "[LISTENER] Set option error: " << ec.message() << std::endl;
+            Logger::error("Listener set option error: " + ec.message());
             return;
         }
         
         acceptor_.bind(endpoint, ec);
         if (ec) {
-            std::cerr << "[LISTENER] Bind error: " << ec.message() << std::endl;
+            Logger::error("Listener bind error: " + ec.message());
             return;
         }
         
         acceptor_.listen(net::socket_base::max_listen_connections, ec);
         if (ec) {
-            std::cerr << "[LISTENER] Listen error: " << ec.message() << std::endl;
+            Logger::error("Listener listen error: " + ec.message());
             return;
         }
     }
@@ -219,7 +221,7 @@ private:
     
     void on_accept(beast::error_code ec, tcp::socket socket) {
         if (ec) {
-            std::cerr << "[LISTENER] Accept error: " << ec.message() << std::endl;
+            Logger::error("Listener accept error: " + ec.message());
             // Don't keep trying if we have a fatal error
             if (ec == net::error::operation_aborted) {
                 return;
@@ -234,10 +236,14 @@ private:
 };
 
 int main(int argc, char* argv[]) {
-    std::string root = "./www";
-    unsigned short port = 8080;
+    // Load server configuration
+    ServerConfig config;
+    config.loadFromFile("server.config");
     
-    // Parse command line arguments
+    std::string root = "./www";
+    unsigned short port = config.port;
+    
+    // Parse command line arguments (override config file)
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--root" && i + 1 < argc) {
@@ -259,32 +265,34 @@ int main(int argc, char* argv[]) {
     std::cout << "╚════════════════════════════════════╝" << std::endl;
     std::cout << "Root: " << root << std::endl;
     std::cout << "Port: " << port << std::endl;
+    std::cout << "MOTD: " << config.motd << std::endl;
     std::cout << std::endl;
     
     // Check if root directory exists
     if (!fs::exists(root)) {
-        std::cerr << "Error: Root directory does not exist: " << root << std::endl;
+        Logger::error("Root directory does not exist: " + root);
         return 1;
     }
     
     try {
         net::io_context ioc{1}; // Single threaded for simplicity
-        Hub hub;
+        Hub hub("./world_save", config.motd);
         
         // Create and launch listening port
         auto listener = std::make_shared<Listener>(ioc, tcp::endpoint{tcp::v4(), port}, root, hub);
         listener->run();
         
-        std::cout << "[SERVER] Listening on http://localhost:" << port << std::endl;
-        std::cout << "[SERVER] WebSocket endpoint: ws://localhost:" << port << "/ws" << std::endl;
-        std::cout << "[SERVER] Press Ctrl+C to stop" << std::endl;
+        Logger::server("Listening on http://localhost:" + std::to_string(port));
+        Logger::server("WebSocket endpoint: ws://localhost:" + std::to_string(port) + "/ws");
+        Logger::server("Press Ctrl+C to stop");
         std::cout << std::endl;
         
         // Setup signal handler for graceful shutdown
         net::signal_set signals(ioc, SIGINT, SIGTERM);
         signals.async_wait([&](beast::error_code const&, int) {
-            std::cout << "\n[SERVER] Shutting down..." << std::endl;
-            std::cout << "[SERVER] Saving world..." << std::endl;
+            std::cout << std::endl;
+            Logger::server("Shutting down...");
+            Logger::server("Saving world...");
             hub.saveWorld();
             ioc.stop();
         });
@@ -294,7 +302,7 @@ int main(int argc, char* argv[]) {
         std::function<void(beast::error_code)> scheduleSave;
         scheduleSave = [&](beast::error_code ec) {
             if (ec) return;
-            std::cout << "[SERVER] Auto-save triggered" << std::endl;
+            Logger::server("Auto-save triggered");
             hub.saveWorld();
             saveTimer.expires_after(std::chrono::minutes(5));
             saveTimer.async_wait(scheduleSave);
@@ -305,10 +313,10 @@ int main(int argc, char* argv[]) {
         // Run the I/O service
         ioc.run();
         
-        std::cout << "[SERVER] Stopped" << std::endl;
+        Logger::server("Stopped");
     }
     catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        Logger::error("Server error: " + std::string(e.what()));
         return 1;
     }
     

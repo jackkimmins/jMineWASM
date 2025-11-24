@@ -24,6 +24,7 @@
 #include "../shared/serialization.hpp"
 #include "../shared/perlin_noise.hpp"
 #include "../shared/world_generation.hpp"
+#include "logger.hpp"
 
 namespace beast = boost::beast;
 namespace http = beast::http;
@@ -35,10 +36,11 @@ class ClientSession;
 
 class Hub {
 public:
-    Hub(const std::string& saveDir = "./world_save") : worldSaveDir(saveDir) {
-        std::cout << "[HUB] Initializing world..." << std::endl;
+    Hub(const std::string& saveDir = "./world_save", const std::string& motd = "Welcome to jMineWASM Server!") 
+        : worldSaveDir(saveDir), serverMotd(motd) {
+        Logger::hub("Initializing world...");
         world.initialise();
-        std::cout << "[HUB] World initialized" << std::endl;
+        Logger::hub("World initialized");
         
         // Try to load existing world data
         loadWorld();
@@ -81,6 +83,7 @@ private:
     std::unordered_map<std::shared_ptr<ClientSession>, std::string> clients; // client -> username
     std::unordered_map<std::string, std::shared_ptr<ClientSession>> usernameToClient; // username -> client
     std::string worldSaveDir;
+    std::string serverMotd;
     
     // Spawn point coordinates
     float spawnX = SPAWN_X;
@@ -164,10 +167,10 @@ private:
     
     void on_accept(beast::error_code ec) {
         if (ec) {
-            std::cerr << "[SESSION] Accept error: " << ec.message() << std::endl;
+            Logger::error("Session accept error: " + ec.message());
             return;
         }
-        std::cout << "[SESSION] Client connected" << std::endl;
+        Logger::session("Client connected");
         hub_.addClient(shared_from_this());
         do_read();
     }
@@ -178,13 +181,13 @@ private:
     
     void on_read(beast::error_code ec, std::size_t bytes_transferred) {
         if (ec == websocket::error::closed) {
-            std::cout << "[SESSION] Client disconnected" << std::endl;
+            Logger::session("Client disconnected");
             hub_.removeClient(shared_from_this());
             return;
         }
         
         if (ec) {
-            std::cerr << "[SESSION] Read error: " << ec.message() << std::endl;
+            Logger::error("Session read error: " + ec.message());
             hub_.removeClient(shared_from_this());
             return;
         }
@@ -207,7 +210,7 @@ private:
     
     void on_write(beast::error_code ec, std::size_t bytes_transferred) {
         if (ec) {
-            std::cerr << "[SESSION] Write error: " << ec.message() << std::endl;
+            Logger::error("Session write error: " + ec.message());
             return;
         }
         

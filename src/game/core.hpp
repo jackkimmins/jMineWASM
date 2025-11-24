@@ -43,6 +43,8 @@ public:
     // Network client
     NetworkClient netClient;
     std::string myUsername = "";  // Our username from server authentication
+    std::string serverAddress = "";  // Server address for display
+    const int maxPlayers = 10;  // Maximum players (will be configurable later)
     int lastInterestChunkX = -9999;
     int lastInterestChunkZ = -9999;
     std::unordered_map<ChunkCoord, int> chunkRevisions; // Track revisions for reconciliation
@@ -161,6 +163,10 @@ private:
     // Timing
     float calculateDeltaTime();
 
+    // localStorage helpers
+    std::string loadUsernameFromStorage();
+    void saveUsernameToStorage(const std::string& username);
+
     // World / physics helpers
     bool isBlockSolid(int x, int y, int z) const;
     bool isBlockSelectable(int x, int y, int z) const;
@@ -172,6 +178,9 @@ private:
 
     // Physics & movement
     void applyPhysics(float dt);
+    
+    // Game state management
+    void returnToMainMenu();
     void processInput(float dt);
 
     // Edits
