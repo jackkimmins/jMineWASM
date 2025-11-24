@@ -41,7 +41,7 @@ inline void Game::init() {
             out vec4 FragColor;
 
             void main() {
-                vec2 texCoord = TexCoord;
+                vec2 atlasCoord = TexCoord;
 
                 // Atlas is 128x128 with 16x16 tiles = 8x8 grid
                 float atlasWidth = 128.0;
@@ -51,7 +51,7 @@ inline void Game::init() {
                 
                 // Determine which tile index based on UV coordinates
                 // UVs are already calculated to point to specific tiles
-                vec2 pixelCoord = texCoord * vec2(atlasWidth, atlasHeight);
+                vec2 pixelCoord = atlasCoord * vec2(atlasWidth, atlasHeight);
                 float tileX = floor(pixelCoord.x / tileSize);
                 float tileY = floor(pixelCoord.y / tileSize);
                 float tileIndex = tileY * tilesPerRow + tileX;
@@ -68,6 +68,41 @@ inline void Game::init() {
                 bool isFlower    = (tileIndex >= 15.0 && tileIndex < 17.0);
                 bool isGlass     = (tileIndex >= 19.0 && tileIndex < 20.0);
                 bool isCutout    = isLeaves || isTallGrass || isFlower;
+                bool isGrassSide = (tileIndex >= 2.0 && tileIndex < 3.0); // grass side texture
+
+                // Greedy quads collapse UVs to a single point; rebuild per-block UVs using world position
+                float uvGradient = max(length(dFdx(TexCoord)), length(dFdy(TexCoord)));
+                if (uvGradient < 1e-6) {
+                    vec3 dx = dFdx(WorldPos);
+                    vec3 dy = dFdy(WorldPos);
+                    vec3 n = normalize(cross(dx, dy));
+                    vec3 an = abs(n);
+
+                    vec2 withinTile;
+                    if (an.x > an.y && an.x > an.z) {
+                        withinTile = vec2(fract(WorldPos.z), fract(WorldPos.y)); // +X/-X faces -> use Z/Y
+                    } else if (an.y > an.z) {
+                        withinTile = vec2(fract(WorldPos.x), fract(WorldPos.z)); // +Y/-Y faces -> use X/Z
+                    } else {
+                        withinTile = vec2(fract(WorldPos.x), fract(WorldPos.y)); // +Z/-Z faces -> use X/Y
+                    }
+
+                    float inset = 0.001;
+                    vec2 base = vec2(tileX, tileY) * tileSize + inset;
+                    vec2 span = vec2(tileSize - 2.0 * inset);
+                    atlasCoord = (base + withinTile * span) / vec2(atlasWidth, atlasHeight);
+                    pixelCoord = atlasCoord * vec2(atlasWidth, atlasHeight);
+                }
+
+                // Rotate grass side texture 180 degrees so blades point up
+                if (isGrassSide) {
+                    vec2 tileOrigin = vec2(tileX * tileSize, tileY * tileSize);
+                    vec2 withinTile = mod(pixelCoord - tileOrigin, tileSize);
+                    withinTile = mod(vec2(tileSize) - withinTile, tileSize);
+                    vec2 newPixelCoord = tileOrigin + withinTile;
+                    atlasCoord = newPixelCoord / vec2(atlasWidth, atlasHeight);
+                    pixelCoord = newPixelCoord;
+                }
 
                 // Animate water by cycling through frames 9,10,11,12
                 if (isWater) {
@@ -82,10 +117,10 @@ inline void Game::init() {
                     float waterTileY = floor(waterTileIndex / tilesPerRow);
                     
                     vec2 newPixelCoord = vec2(waterTileX * tileSize, waterTileY * tileSize) + withinTile;
-                    texCoord = newPixelCoord / vec2(atlasWidth, atlasHeight);
+                    atlasCoord = newPixelCoord / vec2(atlasWidth, atlasHeight);
                 }
 
-                vec4 texColor = texture(uTexture, texCoord);
+                vec4 texColor = texture(uTexture, atlasCoord);
 
                 // Alpha-test cutout for foliage (leaves, tall grass etc.)
                 if (isCutout) {

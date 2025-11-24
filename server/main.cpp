@@ -261,11 +261,9 @@ int main(int argc, char* argv[]) {
     }
     
     std::cout << "╔════════════════════════════════════╗" << std::endl;
-    std::cout << "║   jMineWASM Authoritative Server  ║" << std::endl;
+    std::cout << "║          jMineWASM Server          ║" << std::endl;
+    std::cout << "║            Jack Kimmins            ║" << std::endl;
     std::cout << "╚════════════════════════════════════╝" << std::endl;
-    std::cout << "Root: " << root << std::endl;
-    std::cout << "Port: " << port << std::endl;
-    std::cout << "MOTD: " << config.motd << std::endl;
     std::cout << std::endl;
     
     // Check if root directory exists

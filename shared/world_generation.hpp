@@ -1344,6 +1344,31 @@ public:
         if (Chunk* c = getChunk(cx, cy, cz - 1)) c->isDirty = true;
         if (Chunk* c = getChunk(cx, cy, cz + 1)) c->isDirty = true;
     }
+
+    // Mark the chunk containing the block as dirty, and only mark bordering neighbours when the edit touches an edge.
+    void markChunkDirtyForBlock(int wx, int wy, int wz) {
+        if (wx < 0 || wx >= WORLD_SIZE_X || wy < 0 || wy >= WORLD_SIZE_Y || wz < 0 || wz >= WORLD_SIZE_Z) return;
+        int cx = wx / CHUNK_SIZE;
+        int cy = wy / CHUNK_HEIGHT;
+        int cz = wz / CHUNK_SIZE;
+
+        // Always mark the owning chunk.
+        if (Chunk* chunk = getChunk(cx, cy, cz)) {
+            chunk->isDirty = true;
+        }
+
+        const int localX = wx % CHUNK_SIZE;
+        const int localY = wy % CHUNK_HEIGHT;
+        const int localZ = wz % CHUNK_SIZE;
+
+        // Touch neighbours only when on the border to avoid unnecessary rebuilds.
+        if (localX == 0)        if (Chunk* c = getChunk(cx - 1, cy, cz)) c->isDirty = true;
+        if (localX == CHUNK_SIZE - 1) if (Chunk* c = getChunk(cx + 1, cy, cz)) c->isDirty = true;
+        if (localY == 0)        if (Chunk* c = getChunk(cx, cy - 1, cz)) c->isDirty = true;
+        if (localY == CHUNK_HEIGHT - 1) if (Chunk* c = getChunk(cx, cy + 1, cz)) c->isDirty = true;
+        if (localZ == 0)        if (Chunk* c = getChunk(cx, cy, cz - 1)) c->isDirty = true;
+        if (localZ == CHUNK_SIZE - 1) if (Chunk* c = getChunk(cx, cy, cz + 1)) c->isDirty = true;
+    }
     
     const std::unordered_set<ChunkCoord, std::hash<ChunkCoord>>& getLoadedChunks() const {
         return loadedChunks;

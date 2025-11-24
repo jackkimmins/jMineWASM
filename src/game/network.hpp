@@ -334,7 +334,7 @@ inline void Game::handleBlockUpdate(const std::string& message) {
 
     block->type = static_cast<BlockType>(blockType);
     block->isSolid = isSolid;
-    world.markChunkDirty(cx, cy, cz);
+    world.markChunkDirtyForBlock(wx, wy, wz);
 
     std::cout << "[GAME] Applied block_update: (" << wx << "," << wy << "," << wz
               << ") type=" << blockType << " solid=" << isSolid << " rev=" << rev << std::endl;

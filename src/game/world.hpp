@@ -102,7 +102,7 @@ inline void Game::removeBlock(int x, int y, int z) {
         block->isSolid = false;
         block->type = BLOCK_DIRT;
         int cx = x / CHUNK_SIZE, cy = y / CHUNK_HEIGHT, cz = z / CHUNK_SIZE;
-        world.markChunkDirty(cx, cy, cz);
+        world.markChunkDirtyForBlock(x, y, z);
         return;
     }
 
@@ -113,16 +113,14 @@ inline void Game::removeBlock(int x, int y, int z) {
     // Break the supporting block
     block->isSolid = false;
     block->type = BLOCK_DIRT;
-    int cx = x / CHUNK_SIZE, cy = y / CHUNK_HEIGHT, cz = z / CHUNK_SIZE;
-    std::cout << "[GAME] removeBlock optimistic update at (" << x << "," << y << "," << z << ") chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
-    world.markChunkDirty(cx, cy, cz);
+    std::cout << "[GAME] removeBlock optimistic update at (" << x << "," << y << "," << z << ")" << std::endl;
+    world.markChunkDirtyForBlock(x, y, z);
 
     Block* above = world.getBlockAt(x, y + 1, z);
     if (above && isPlant(above->type)) {
         above->isSolid = false;
         above->type = BLOCK_DIRT;
-        int acx = x / CHUNK_SIZE, acy = (y + 1) / CHUNK_HEIGHT, acz = z / CHUNK_SIZE;
-        world.markChunkDirty(acx, acy, acz);
+        world.markChunkDirtyForBlock(x, y + 1, z);
     }
 }
 
@@ -188,11 +186,8 @@ inline void Game::placeBlock(int x, int y, int z) {
     block->isSolid = true;
     block->type = selectedBlockType;
 
-    int cx = x / CHUNK_SIZE;
-    int cy = y / CHUNK_HEIGHT;
-    int cz = z / CHUNK_SIZE;
-    std::cout << "[GAME] placeBlock optimistic update at (" << x << "," << y << "," << z << ") chunk (" << cx << "," << cy << "," << cz << ")" << std::endl;
-    world.markChunkDirty(cx, cy, cz);
+    std::cout << "[GAME] placeBlock optimistic update at (" << x << "," << y << "," << z << ")" << std::endl;
+    world.markChunkDirtyForBlock(x, y, z);
 }
 
 #endif // GAME_WORLD_HPP
