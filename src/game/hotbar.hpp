@@ -5,18 +5,14 @@
 #include <vector>
 
 inline void Game::renderHotbar() {
-    // Get canvas dimensions
-    int width, height;
-    emscripten_get_canvas_element_size("canvas", &width, &height);
-    
     // Hotbar configuration
     const int slotSize = 50;        // Size of each hotbar slot
     const int slotSpacing = 4;      // Space between slots
     const int totalSlots = 9;
     const int hotbarWidth = totalSlots * slotSize + (totalSlots - 1) * slotSpacing;
     const int hotbarHeight = slotSize;
-    const int hotbarX = (width - hotbarWidth) / 2;
-    const int hotbarY = height - hotbarHeight - 20; // 20px from bottom
+    const int hotbarX = (canvasWidth - hotbarWidth) / 2;
+    const int hotbarY = canvasHeight - hotbarHeight - 20; // 20px from bottom
     const int iconPadding = 4;      // Padding inside each slot for the block icon
     
     // Switch to orthographic projection for 2D UI
@@ -78,10 +74,10 @@ inline void Game::renderHotbar() {
         float iconSize = slotSize - 2 * iconPadding;
         
         // Convert to NDC (Normalized Device Coordinates)
-        float x0 = (iconX / float(width)) * 2.0f - 1.0f;
-        float y0 = 1.0f - (iconY / float(height)) * 2.0f;
-        float x1 = ((iconX + iconSize) / float(width)) * 2.0f - 1.0f;
-        float y1 = 1.0f - ((iconY + iconSize) / float(height)) * 2.0f;
+        float x0 = (iconX / float(canvasWidth)) * 2.0f - 1.0f;
+        float y0 = 1.0f - (iconY / float(canvasHeight)) * 2.0f;
+        float x1 = ((iconX + iconSize) / float(canvasWidth)) * 2.0f - 1.0f;
+        float y1 = 1.0f - ((iconY + iconSize) / float(canvasHeight)) * 2.0f;
         
         // Get texture coordinates for the top face of this block
         int texIdx = meshManager.getTextureIndex(blockType, FACE_TOP);
@@ -95,7 +91,7 @@ inline void Game::renderHotbar() {
         float v1 = ((tileY + 1) * 16.0f) / 128.0f - uvInset;
         
         // Create a simple quad (2 triangles) showing the block face
-        std::vector<float> vertices = {
+        float vertices[20] = {
             // Position (x, y, z), TexCoord (u, v)
             x0, y1, 0.0f,  u0, v1,  // Bottom-left
             x1, y1, 0.0f,  u1, v1,  // Bottom-right
@@ -103,16 +99,13 @@ inline void Game::renderHotbar() {
             x0, y0, 0.0f,  u0, v0   // Top-left
         };
         
-        std::vector<unsigned int> indices = {
-            0, 1, 2,  // First triangle
-            2, 3, 0   // Second triangle
-        };
+        static const unsigned int indices[6] = { 0, 1, 2, 2, 3, 0 };
         
         // Upload vertices
         glBindBuffer(GL_ARRAY_BUFFER, hotbarVBO);
-        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, hotbarEBO);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_DYNAMIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
         
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
@@ -125,7 +118,7 @@ inline void Game::renderHotbar() {
         glUniformMatrix4fv(hotbarMvpLoc, 1, GL_FALSE, identityMat.data);
         
         // Draw the block icon
-        glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     }
     
     glBindVertexArray(0);

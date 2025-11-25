@@ -62,10 +62,15 @@ inline void Game::render() {
     camera.x += camRight.x * bobbingHorizontalOffset;
     camera.z += camRight.z * bobbingHorizontalOffset;
 
-    int width, height;
+    int width = canvasWidth;
+    int height = canvasHeight;
     emscripten_get_canvas_element_size("canvas", &width, &height);
-    glViewport(0, 0, width, height);
-    projection = perspective(CAM_FOV * M_PI / 180.0f, (float)width / (float)height, 0.1f, 1000.0f);
+    if (width != canvasWidth || height != canvasHeight) {
+        canvasWidth = width;
+        canvasHeight = height;
+    }
+    glViewport(0, 0, canvasWidth, canvasHeight);
+    projection = perspective(CAM_FOV * M_PI / 180.0f, (float)canvasWidth / (float)canvasHeight, 0.1f, 1000.0f);
 
     glClearColor(0.25f, 0.50f, 0.85f, 1.0f); // Clear to deep sky blue
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -100,19 +105,24 @@ inline void Game::render() {
     Frustum frustum;
     frustum.extractFromMatrix(mvp);
 
-    // FIRST PASS - Draw opaque & alpha-tested (solids + tall grass)
+    // FIRST PASS - Draw opaque (solid blocks), enable culling for overdraw reduction
     glDepthMask(GL_TRUE);
-    glDisable(GL_CULL_FACE);  // disable culling so billboard plants are double-sided
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
     meshManager.drawVisibleChunksSolid(player.x, player.z, &frustum);
 
-    // SECOND PASS - Draw transparent (water)
+    // SECOND PASS - Cutout foliage (billboard plants), disable culling for double-sided quads
+    glDisable(GL_CULL_FACE);
+    meshManager.drawVisibleChunksPlants(player.x, player.z, &frustum);
+
+    // THIRD PASS - Draw transparent (water)
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(-1.0f, -1.0f);
     glDepthMask(GL_FALSE);
     meshManager.drawVisibleChunksWater(player.x, player.z, &frustum);
     glDisable(GL_POLYGON_OFFSET_FILL);
     
-    // THIRD PASS - Draw glass (semi-transparent)
+    // FOURTH PASS - Draw glass (semi-transparent)
     // Enable back-face culling for glass to prevent seeing back faces through glass
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
@@ -212,23 +222,21 @@ inline void Game::renderUI() {
     glDisable(GL_DEPTH_TEST);
 
     // Update text renderer projection if window size changed
-    int width, height;
-    emscripten_get_canvas_element_size("canvas", &width, &height);
-    if (width != textRenderer.getScreenWidth() || height != textRenderer.getScreenHeight()) {
-        textRenderer.updateProjection(width, height);
+    if (canvasWidth != textRenderer.getScreenWidth() || canvasHeight != textRenderer.getScreenHeight()) {
+        textRenderer.updateProjection(canvasWidth, canvasHeight);
     }
 
     // Handle different game states
     if (gameState == GameState::MAIN_MENU) {
-        renderMainMenu(width, height);
+        renderMainMenu(canvasWidth, canvasHeight);
     } else if (gameState == GameState::USERNAME_INPUT) {
-        renderUsernameInput(width, height);
+        renderUsernameInput(canvasWidth, canvasHeight);
     } else if (gameState == GameState::LOADING || gameState == GameState::CONNECTING || gameState == GameState::WAITING_FOR_WORLD) {
         // Full screen black background for loading
         textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 1.0f);
 
         // Show loading status in center
-        float centerY = height / 2.0f - 30.0f;
+        float centerY = canvasHeight / 2.0f - 30.0f;
         textRenderer.drawTextCentered(loadingStatus, centerY, 3.0f, 1.0f, 1.0f, 1.0f, 1.0f);
 
         // Show additional info based on state
@@ -243,7 +251,7 @@ inline void Game::renderUI() {
         textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 1.0f);
 
         // Show disconnect message
-        float centerY = height / 2.0f - 60.0f;
+        float centerY = canvasHeight / 2.0f - 60.0f;
         textRenderer.drawTextCentered("DISCONNECTED", centerY, 4.0f, 1.0f, 0.3f, 0.3f, 1.0f);
 
         // Show reason/instructions
@@ -293,7 +301,7 @@ inline void Game::renderUI() {
             textRenderer.drawOverlay(0.0f, 0.0f, 0.0f, 0.6f);
             
             // Display "PAUSED" in center
-            float centerY = height / 2.0f - 30.0f;
+            float centerY = canvasHeight / 2.0f - 30.0f;
             textRenderer.drawTextCentered("GAME PAUSED", centerY, 5.0f, 1.0f, 1.0f, 1.0f, 1.0f);
 
             // Display instructions

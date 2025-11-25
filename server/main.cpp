@@ -76,8 +76,6 @@ private:
         
         // Check for WebSocket upgrade
         if (websocket::is_upgrade(req_)) {
-            Logger::http("WebSocket upgrade request");
-            
             // Create WebSocket session and pass the request for handshake
             auto ws = std::make_shared<ClientSession>(std::move(socket_), hub_);
             ws->run(std::move(req_));
@@ -95,7 +93,6 @@ private:
         }
         
         std::string path = root_ + target;
-        Logger::http("GET " + std::string(req_.target()) + " -> " + path);
         
         // Check if file exists
         beast::error_code ec;
@@ -163,7 +160,6 @@ private:
     }
     
     void do_close() {
-        Logger::http("do_close() called");
         beast::error_code ec;
         socket_.shutdown(tcp::socket::shutdown_send, ec);
         if (ec) {

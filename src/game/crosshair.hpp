@@ -2,12 +2,12 @@
 #define GAME_CROSSHAIR_HPP
 
 inline void Game::renderCrosshair() {
-    int width, height;
-    emscripten_get_canvas_element_size("canvas", &width, &height);
+    if (canvasWidth == 0 || canvasHeight == 0) return;
+    bool needsUpload = (canvasWidth != lastCrosshairWidth) || (canvasHeight != lastCrosshairHeight) || crosshairVertexCount == 0;
     
     // Calculate center of screen
-    float centerX = width / 2.0f;
-    float centerY = height / 2.0f;
+    float centerX = canvasWidth / 2.0f;
+    float centerY = canvasHeight / 2.0f;
     
     // Crosshair dimensions (in pixels)
     float crosshairSize = 10.0f;  // Length of each arm
@@ -16,8 +16,8 @@ inline void Game::renderCrosshair() {
     
     // Create orthographic projection matrix for 2D rendering
     float left = 0.0f;
-    float right = static_cast<float>(width);
-    float bottom = static_cast<float>(height);
+    float right = static_cast<float>(canvasWidth);
+    float bottom = static_cast<float>(canvasHeight);
     float top = 0.0f;
     float nearPlane = -1.0f;
     float farPlane = 1.0f;
@@ -43,73 +43,67 @@ inline void Game::renderCrosshair() {
     orthoProj.data[14] = -(farPlane + nearPlane) / (farPlane - nearPlane);
     orthoProj.data[15] = 1.0f;
     
-    // Define crosshair vertices (4 rectangles forming a plus sign)
-    // Horizontal line (left arm)
-    float leftX = centerX - crosshairGap - crosshairSize;
-    float leftY = centerY - crosshairThickness / 2.0f;
-    
-    // Horizontal line (right arm)
-    float rightX = centerX + crosshairGap;
-    float rightY = centerY - crosshairThickness / 2.0f;
-    
-    // Vertical line (top arm)
-    float topX = centerX - crosshairThickness / 2.0f;
-    float topY = centerY - crosshairGap - crosshairSize;
-    
-    // Vertical line (bottom arm)
-    float bottomX = centerX - crosshairThickness / 2.0f;
-    float bottomY = centerY + crosshairGap;
-    
-    // Build vertex array with 4 rectangles (2 triangles each = 6 vertices per rectangle)
-    std::vector<float> vertices;
-    
-    // Left arm (horizontal)
-    vertices.push_back(leftX); vertices.push_back(leftY);
-    vertices.push_back(leftX + crosshairSize); vertices.push_back(leftY);
-    vertices.push_back(leftX); vertices.push_back(leftY + crosshairThickness);
-    
-    vertices.push_back(leftX + crosshairSize); vertices.push_back(leftY);
-    vertices.push_back(leftX + crosshairSize); vertices.push_back(leftY + crosshairThickness);
-    vertices.push_back(leftX); vertices.push_back(leftY + crosshairThickness);
-    
-    // Right arm (horizontal)
-    vertices.push_back(rightX); vertices.push_back(rightY);
-    vertices.push_back(rightX + crosshairSize); vertices.push_back(rightY);
-    vertices.push_back(rightX); vertices.push_back(rightY + crosshairThickness);
-    
-    vertices.push_back(rightX + crosshairSize); vertices.push_back(rightY);
-    vertices.push_back(rightX + crosshairSize); vertices.push_back(rightY + crosshairThickness);
-    vertices.push_back(rightX); vertices.push_back(rightY + crosshairThickness);
-    
-    // Top arm (vertical)
-    vertices.push_back(topX); vertices.push_back(topY);
-    vertices.push_back(topX + crosshairThickness); vertices.push_back(topY);
-    vertices.push_back(topX); vertices.push_back(topY + crosshairSize);
-    
-    vertices.push_back(topX + crosshairThickness); vertices.push_back(topY);
-    vertices.push_back(topX + crosshairThickness); vertices.push_back(topY + crosshairSize);
-    vertices.push_back(topX); vertices.push_back(topY + crosshairSize);
-    
-    // Bottom arm (vertical)
-    vertices.push_back(bottomX); vertices.push_back(bottomY);
-    vertices.push_back(bottomX + crosshairThickness); vertices.push_back(bottomY);
-    vertices.push_back(bottomX); vertices.push_back(bottomY + crosshairSize);
-    
-    vertices.push_back(bottomX + crosshairThickness); vertices.push_back(bottomY);
-    vertices.push_back(bottomX + crosshairThickness); vertices.push_back(bottomY + crosshairSize);
-    vertices.push_back(bottomX); vertices.push_back(bottomY + crosshairSize);
+    // Rebuild vertex data only when size changes
+    if (needsUpload) {
+        lastCrosshairWidth = canvasWidth;
+        lastCrosshairHeight = canvasHeight;
+        
+        float leftX = centerX - crosshairGap - crosshairSize;
+        float leftY = centerY - crosshairThickness / 2.0f;
+        
+        float rightX = centerX + crosshairGap;
+        float rightY = centerY - crosshairThickness / 2.0f;
+        
+        float topX = centerX - crosshairThickness / 2.0f;
+        float topY = centerY - crosshairGap - crosshairSize;
+        
+        float bottomX = centerX - crosshairThickness / 2.0f;
+        float bottomY = centerY + crosshairGap;
+        
+        float verts[48] = {
+            // Left arm
+            leftX, leftY,
+            leftX + crosshairSize, leftY,
+            leftX, leftY + crosshairThickness,
+            leftX + crosshairSize, leftY,
+            leftX + crosshairSize, leftY + crosshairThickness,
+            leftX, leftY + crosshairThickness,
+            // Right arm
+            rightX, rightY,
+            rightX + crosshairSize, rightY,
+            rightX, rightY + crosshairThickness,
+            rightX + crosshairSize, rightY,
+            rightX + crosshairSize, rightY + crosshairThickness,
+            rightX, rightY + crosshairThickness,
+            // Top arm
+            topX, topY,
+            topX + crosshairThickness, topY,
+            topX, topY + crosshairSize,
+            topX + crosshairThickness, topY,
+            topX + crosshairThickness, topY + crosshairSize,
+            topX, topY + crosshairSize,
+            // Bottom arm
+            bottomX, bottomY,
+            bottomX + crosshairThickness, bottomY,
+            bottomX, bottomY + crosshairSize,
+            bottomX + crosshairThickness, bottomY,
+            bottomX + crosshairThickness, bottomY + crosshairSize,
+            bottomX, bottomY + crosshairSize
+        };
+        
+        glBindVertexArray(crosshairVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, crosshairVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+        crosshairVertexCount = 24; // 4 quads * 6 vertices
+    }
     
     // Use crosshair shader
     crosshairShader->use();
     glUniformMatrix4fv(crosshairProjLoc, 1, GL_FALSE, orthoProj.data);
     
-    // Bind VAO and upload vertex data
     glBindVertexArray(crosshairVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, crosshairVBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
-    
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     
     // Enable blending with invert mode for color inversion effect
     glEnable(GL_BLEND);
@@ -118,8 +112,7 @@ inline void Game::renderCrosshair() {
     // Disable depth test for 2D overlay
     glDisable(GL_DEPTH_TEST);
     
-    // Draw the crosshair
-    glDrawArrays(GL_TRIANGLES, 0, vertices.size() / 2);
+    glDrawArrays(GL_TRIANGLES, 0, crosshairVertexCount);
     
     // Restore OpenGL state
     glEnable(GL_DEPTH_TEST);

@@ -3,6 +3,7 @@
 #define MESH_HPP
 
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <memory>
 #include <array>
@@ -21,19 +22,33 @@ class ChunkMesh {
 public:
     std::vector<float> solidVertices;
     std::vector<unsigned int> solidIndices;
+    std::vector<float> plantVertices;
+    std::vector<unsigned int> plantIndices;
     std::vector<float> waterVertices;
     std::vector<unsigned int> waterIndices;
     std::vector<float> glassVertices;
     std::vector<unsigned int> glassIndices;
     GLuint solidVAO, solidVBO, solidEBO;
+    GLuint plantVAO, plantVBO, plantEBO;
     GLuint waterVAO, waterVBO, waterEBO;
     GLuint glassVAO, glassVBO, glassEBO;
     bool isSetup = false;
+    size_t solidVertexCapacity = 0;
+    size_t solidIndexCapacity = 0;
+    size_t plantVertexCapacity = 0;
+    size_t plantIndexCapacity = 0;
+    size_t waterVertexCapacity = 0;
+    size_t waterIndexCapacity = 0;
+    size_t glassVertexCapacity = 0;
+    size_t glassIndexCapacity = 0;
     
     ChunkMesh() {
         glGenVertexArrays(1, &solidVAO);
         glGenBuffers(1, &solidVBO);
         glGenBuffers(1, &solidEBO);
+        glGenVertexArrays(1, &plantVAO);
+        glGenBuffers(1, &plantVBO);
+        glGenBuffers(1, &plantEBO);
         glGenVertexArrays(1, &waterVAO);
         glGenBuffers(1, &waterVBO);
         glGenBuffers(1, &waterEBO);
@@ -43,18 +58,28 @@ public:
     }
     
     void setup() {
-        auto upload = [](GLuint vao, GLuint vbo, GLuint ebo, const std::vector<float>& vertices, const std::vector<unsigned int>& indices) {
+        auto upload = [](GLuint vao, GLuint vbo, GLuint ebo, const std::vector<float>& vertices, const std::vector<unsigned int>& indices, size_t& vCap, size_t& iCap) {
             if (vertices.empty()) return;
             glBindVertexArray(vao);
 
+            const size_t vBytes = vertices.size() * sizeof(float);
+            const size_t iBytes = indices.size() * sizeof(unsigned int);
+
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
-            // Orphan old data to avoid stalls, then upload new contents.
-            glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
+            if (vBytes > vCap) {
+                glBufferData(GL_ARRAY_BUFFER, vBytes, vertices.data(), GL_DYNAMIC_DRAW);
+                vCap = vBytes;
+            } else {
+                glBufferSubData(GL_ARRAY_BUFFER, 0, vBytes, vertices.data());
+            }
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), nullptr, GL_DYNAMIC_DRAW);
-            glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, indices.size() * sizeof(unsigned int), indices.data());
+            if (iBytes > iCap) {
+                glBufferData(GL_ELEMENT_ARRAY_BUFFER, iBytes, indices.data(), GL_DYNAMIC_DRAW);
+                iCap = iBytes;
+            } else {
+                glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, iBytes, indices.data());
+            }
             
             glEnableVertexAttribArray(0);
             glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
@@ -65,9 +90,10 @@ public:
             glBindVertexArray(0);
         };
 
-        upload(solidVAO, solidVBO, solidEBO, solidVertices, solidIndices);
-        upload(waterVAO, waterVBO, waterEBO, waterVertices, waterIndices);
-        upload(glassVAO, glassVBO, glassEBO, glassVertices, glassIndices);
+        upload(solidVAO, solidVBO, solidEBO, solidVertices, solidIndices, solidVertexCapacity, solidIndexCapacity);
+        upload(plantVAO, plantVBO, plantEBO, plantVertices, plantIndices, plantVertexCapacity, plantIndexCapacity);
+        upload(waterVAO, waterVBO, waterEBO, waterVertices, waterIndices, waterVertexCapacity, waterIndexCapacity);
+        upload(glassVAO, glassVBO, glassEBO, glassVertices, glassIndices, glassVertexCapacity, glassIndexCapacity);
         
         isSetup = true;
     }
@@ -76,6 +102,13 @@ public:
         if (!isSetup || solidIndices.empty()) return;
         glBindVertexArray(solidVAO);
         glDrawElements(GL_TRIANGLES, solidIndices.size(), GL_UNSIGNED_INT, 0);
+        glBindVertexArray(0);
+    }
+    
+    void drawPlants() const {
+        if (!isSetup || plantIndices.empty()) return;
+        glBindVertexArray(plantVAO);
+        glDrawElements(GL_TRIANGLES, plantIndices.size(), GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
     }
     
@@ -97,6 +130,9 @@ public:
         glDeleteBuffers(1, &solidVBO);
         glDeleteBuffers(1, &solidEBO);
         glDeleteVertexArrays(1, &solidVAO);
+        glDeleteBuffers(1, &plantVBO);
+        glDeleteBuffers(1, &plantEBO);
+        glDeleteVertexArrays(1, &plantVAO);
         glDeleteBuffers(1, &waterVBO);
         glDeleteBuffers(1, &waterEBO);
         glDeleteVertexArrays(1, &waterVAO);
@@ -194,6 +230,8 @@ private:
 class MeshManager {
 public:
     std::unordered_map<ChunkCoord, std::unique_ptr<ChunkMesh>> chunkMeshes;
+    std::vector<ChunkCoord> dirtyQueue;
+    std::unordered_set<ChunkCoord> dirtySet;
     
     void generateChunkMesh(const World& world, int cx, int cy, int cz) {
         ChunkCoord coord{cx, cy, cz};
@@ -210,11 +248,14 @@ public:
         
         mesh->solidVertices.clear();
         mesh->solidIndices.clear();
+        mesh->plantVertices.clear();
+        mesh->plantIndices.clear();
         mesh->waterVertices.clear();
         mesh->waterIndices.clear();
         mesh->glassVertices.clear();
         mesh->glassIndices.clear();
         unsigned int solidIndex = 0;
+        unsigned int plantIndex = 0;
         unsigned int waterIndex = 0;
         unsigned int glassIndex = 0;
 
@@ -233,7 +274,7 @@ public:
                         float wx = baseX + x;
                         float wy = baseY + y;
                         float wz = baseZ + z;
-                        addBillboardPlant(*mesh, wx, wy, wz, solidIndex, block.type);
+                        addBillboardPlant(*mesh, wx, wy, wz, plantIndex, block.type);
                     }
                 }
             }
@@ -410,16 +451,36 @@ public:
         mesh->setup();
     }
     
+    void markChunkDirty(const ChunkCoord& coord) {
+        if (dirtySet.insert(coord).second) {
+            dirtyQueue.push_back(coord);
+        }
+    }
+    
     void updateDirtyChunks(World& world) {     
         static constexpr int MAX_DIRTY_PER_FRAME = 4;
         int processed = 0;
-        for (const auto& coord : world.getLoadedChunks()) {
-            if (processed >= MAX_DIRTY_PER_FRAME) break;
+        // Process queued dirty chunks first to avoid scanning all loaded chunks.
+        while (!dirtyQueue.empty() && processed < MAX_DIRTY_PER_FRAME) {
+            ChunkCoord coord = dirtyQueue.back();
+            dirtyQueue.pop_back();
+            dirtySet.erase(coord);
             Chunk* chunk = world.getChunk(coord.x, coord.y, coord.z);
-            if (chunk && chunk->isDirty) {
-                generateChunkMesh(world, coord.x, coord.y, coord.z);
-                chunk->isDirty = false;
-                ++processed;
+            if (!chunk || !chunk->isDirty) continue;
+            generateChunkMesh(world, coord.x, coord.y, coord.z);
+            chunk->isDirty = false;
+            ++processed;
+        }
+        // Fallback: scan for any remaining dirty chunks if queue missed them (bounded by MAX_DIRTY_PER_FRAME).
+        if (processed < MAX_DIRTY_PER_FRAME) {
+            for (const auto& coord : world.getLoadedChunks()) {
+                if (processed >= MAX_DIRTY_PER_FRAME) break;
+                Chunk* chunk = world.getChunk(coord.x, coord.y, coord.z);
+                if (chunk && chunk->isDirty) {
+                    generateChunkMesh(world, coord.x, coord.y, coord.z);
+                    chunk->isDirty = false;
+                    ++processed;
+                }
             }
         }
     }
@@ -428,8 +489,8 @@ public:
         int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
         int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
         
-        int chunksRendered = 0;
-        int chunksCulled = 0;
+        std::vector<std::pair<float, ChunkMesh*>> drawList;
+        drawList.reserve(chunkMeshes.size());
         
         for (auto& pair : chunkMeshes) {
             const ChunkCoord& coord = pair.first;
@@ -444,19 +505,55 @@ public:
             // Frustum culling (if frustum is provided)
             if (frustum) {
                 if (!frustum->isChunkVisible(coord.x, coord.y, coord.z, CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE)) {
-                    chunksCulled++;
                     continue;
                 }
             }
             
-            pair.second->drawSolid();
-            chunksRendered++;
+            float dist2 = static_cast<float>(dx * dx + dz * dz);
+            drawList.push_back({dist2, pair.second.get()});
         }
         
-        // Debug output (can be removed in production)
-        static int frameCount = 0;
-        if (++frameCount % 60 == 0) {
-            // std::cout << "[RENDER] Chunks rendered: " << chunksRendered << ", culled: " << chunksCulled << std::endl;
+        std::sort(drawList.begin(), drawList.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first; // front-to-back for early-Z
+        });
+        
+        for (const auto& item : drawList) {
+            item.second->drawSolid();
+        }
+    }
+    
+    void drawVisibleChunksPlants(float playerX, float playerZ, const Frustum* frustum = nullptr) {
+        int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
+        int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
+        
+        std::vector<std::pair<float, ChunkMesh*>> drawList;
+        drawList.reserve(chunkMeshes.size());
+        
+        for (auto& pair : chunkMeshes) {
+            const ChunkCoord& coord = pair.first;
+            int dx = coord.x - centerChunkX;
+            int dz = coord.z - centerChunkZ;
+            
+            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) {
+                continue;
+            }
+            
+            if (frustum) {
+                if (!frustum->isChunkVisible(coord.x, coord.y, coord.z, CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE)) {
+                    continue;
+                }
+            }
+            
+            float dist2 = static_cast<float>(dx * dx + dz * dz);
+            drawList.push_back({dist2, pair.second.get()});
+        }
+        
+        std::sort(drawList.begin(), drawList.end(), [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+        
+        for (const auto& item : drawList) {
+            item.second->drawPlants();
         }
     }
     
@@ -464,30 +561,8 @@ public:
         int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
         int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
         
-        for (auto& pair : chunkMeshes) {
-            const ChunkCoord& coord = pair.first;
-            int dx = coord.x - centerChunkX;
-            int dz = coord.z - centerChunkZ;
-            
-            // Distance culling (2D horizontal distance)
-            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) {
-                continue;
-            }
-            
-            // Frustum culling (if frustum is provided)
-            if (frustum) {
-                if (!frustum->isChunkVisible(coord.x, coord.y, coord.z, CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE)) {
-                    continue;
-                }
-            }
-            
-            pair.second->drawWater();
-        }
-    }
-    
-    void drawVisibleChunksGlass(float playerX, float playerZ, const Frustum* frustum = nullptr) {
-        int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
-        int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
+        std::vector<std::pair<float, ChunkMesh*>> drawList;
+        drawList.reserve(chunkMeshes.size());
         
         for (auto& pair : chunkMeshes) {
             const ChunkCoord& coord = pair.first;
@@ -506,7 +581,53 @@ public:
                 }
             }
             
-            pair.second->drawGlass();
+            float dist2 = static_cast<float>(dx * dx + dz * dz);
+            drawList.push_back({dist2, pair.second.get()});
+        }
+        
+        std::sort(drawList.begin(), drawList.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first; // back-to-front for blending
+        });
+        
+        for (const auto& item : drawList) {
+            item.second->drawWater();
+        }
+    }
+    
+    void drawVisibleChunksGlass(float playerX, float playerZ, const Frustum* frustum = nullptr) {
+        int centerChunkX = static_cast<int>(std::floor(playerX / CHUNK_SIZE));
+        int centerChunkZ = static_cast<int>(std::floor(playerZ / CHUNK_SIZE));
+        
+        std::vector<std::pair<float, ChunkMesh*>> drawList;
+        drawList.reserve(chunkMeshes.size());
+        
+        for (auto& pair : chunkMeshes) {
+            const ChunkCoord& coord = pair.first;
+            int dx = coord.x - centerChunkX;
+            int dz = coord.z - centerChunkZ;
+            
+            // Distance culling (2D horizontal distance)
+            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) {
+                continue;
+            }
+            
+            // Frustum culling (if frustum is provided)
+            if (frustum) {
+                if (!frustum->isChunkVisible(coord.x, coord.y, coord.z, CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE)) {
+                    continue;
+                }
+            }
+            
+            float dist2 = static_cast<float>(dx * dx + dz * dz);
+            drawList.push_back({dist2, pair.second.get()});
+        }
+        
+        std::sort(drawList.begin(), drawList.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first;
+        });
+        
+        for (const auto& item : drawList) {
+            item.second->drawGlass();
         }
     }
     
@@ -561,8 +682,8 @@ private:
         float v1 = ((tileY + 1) * ATLAS_TILE_SIZE) / float(ATLAS_HEIGHT) - uvInset;
         float uv[4][2] = { {u0,v1}, {u1,v1}, {u1,v0}, {u0,v0} };
 
-        std::vector<float>& vertices = mesh.solidVertices;
-        std::vector<unsigned int>& indices = mesh.solidIndices;
+        std::vector<float>& vertices = mesh.plantVertices;
+        std::vector<unsigned int>& indices = mesh.plantIndices;
 
         const float y0 = y;
         const float y1 = y + 1.0f;

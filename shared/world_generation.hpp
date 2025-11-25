@@ -37,6 +37,7 @@ private:
     PerlinNoise perlin;
     std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>> chunks;
     std::unordered_set<ChunkCoord, std::hash<ChunkCoord>> loadedChunks;
+    std::function<void(const ChunkCoord&)> onChunkDirty;
 
     inline void setBlockAndMarkDirty(int x, int y, int z, BlockType t, bool solid = true) {
         if (x < 0 || x >= WORLD_SIZE_X || y < 0 || y >= WORLD_SIZE_Y || z < 0 || z >= WORLD_SIZE_Z) return;
@@ -1334,15 +1335,16 @@ public:
         if (Chunk* chunk = getChunk(cx, cy, cz)) {
             bool wasDirty = chunk->isDirty;
             chunk->isDirty = true;
+            if (!wasDirty && onChunkDirty) onChunkDirty(chunk->coord);
         } else {
             std::cout << "[WORLD] WARNING: Chunk (" << cx << "," << cy << "," << cz << ") not found!" << std::endl;
         }
-        if (Chunk* c = getChunk(cx - 1, cy, cz)) c->isDirty = true;
-        if (Chunk* c = getChunk(cx + 1, cy, cz)) c->isDirty = true;
-        if (Chunk* c = getChunk(cx, cy - 1, cz)) c->isDirty = true;
-        if (Chunk* c = getChunk(cx, cy + 1, cz)) c->isDirty = true;
-        if (Chunk* c = getChunk(cx, cy, cz - 1)) c->isDirty = true;
-        if (Chunk* c = getChunk(cx, cy, cz + 1)) c->isDirty = true;
+        if (Chunk* c = getChunk(cx - 1, cy, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (Chunk* c = getChunk(cx + 1, cy, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (Chunk* c = getChunk(cx, cy - 1, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (Chunk* c = getChunk(cx, cy + 1, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (Chunk* c = getChunk(cx, cy, cz - 1)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (Chunk* c = getChunk(cx, cy, cz + 1)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
     }
 
     // Mark the chunk containing the block as dirty, and only mark bordering neighbours when the edit touches an edge.
@@ -1354,7 +1356,9 @@ public:
 
         // Always mark the owning chunk.
         if (Chunk* chunk = getChunk(cx, cy, cz)) {
+            bool wasDirty = chunk->isDirty;
             chunk->isDirty = true;
+            if (!wasDirty && onChunkDirty) onChunkDirty(chunk->coord);
         }
 
         const int localX = wx % CHUNK_SIZE;
@@ -1362,12 +1366,12 @@ public:
         const int localZ = wz % CHUNK_SIZE;
 
         // Touch neighbours only when on the border to avoid unnecessary rebuilds.
-        if (localX == 0)        if (Chunk* c = getChunk(cx - 1, cy, cz)) c->isDirty = true;
-        if (localX == CHUNK_SIZE - 1) if (Chunk* c = getChunk(cx + 1, cy, cz)) c->isDirty = true;
-        if (localY == 0)        if (Chunk* c = getChunk(cx, cy - 1, cz)) c->isDirty = true;
-        if (localY == CHUNK_HEIGHT - 1) if (Chunk* c = getChunk(cx, cy + 1, cz)) c->isDirty = true;
-        if (localZ == 0)        if (Chunk* c = getChunk(cx, cy, cz - 1)) c->isDirty = true;
-        if (localZ == CHUNK_SIZE - 1) if (Chunk* c = getChunk(cx, cy, cz + 1)) c->isDirty = true;
+        if (localX == 0)        if (Chunk* c = getChunk(cx - 1, cy, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (localX == CHUNK_SIZE - 1) if (Chunk* c = getChunk(cx + 1, cy, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (localY == 0)        if (Chunk* c = getChunk(cx, cy - 1, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (localY == CHUNK_HEIGHT - 1) if (Chunk* c = getChunk(cx, cy + 1, cz)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (localZ == 0)        if (Chunk* c = getChunk(cx, cy, cz - 1)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
+        if (localZ == CHUNK_SIZE - 1) if (Chunk* c = getChunk(cx, cy, cz + 1)) { bool dirty = c->isDirty; c->isDirty = true; if (!dirty && onChunkDirty) onChunkDirty(c->coord); }
     }
     
     const std::unordered_set<ChunkCoord, std::hash<ChunkCoord>>& getLoadedChunks() const {
@@ -1376,6 +1380,10 @@ public:
     
     const std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>>& getChunks() const {
         return chunks;
+    }
+
+    void setOnChunkDirty(const std::function<void(const ChunkCoord&)>& cb) {
+        onChunkDirty = cb;
     }
 
     // Networking methods for future client/server architecture

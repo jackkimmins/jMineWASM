@@ -323,6 +323,9 @@ inline void Game::init() {
 
     // Initialise and generate the world
     loadingStatus = "Initializing world...";
+    world.setOnChunkDirty([this](const ChunkCoord& coord) {
+        meshManager.markChunkDirty(coord);
+    });
     world.initialise();
 
     // Check for network mode
@@ -398,7 +401,6 @@ inline void Game::init() {
     // Don't initialize lastPlayerChunkX/Z here - keep them at -999/-999
     // so that hello message gets sent on first updateChunks() call
 
-    int canvasWidth, canvasHeight;
     emscripten_get_canvas_element_size("canvas", &canvasWidth, &canvasHeight);
 
     projection = perspective(CAM_FOV * M_PI / 180.0f, static_cast<float>(canvasWidth) / static_cast<float>(canvasHeight), 0.1f, 1000.0f);

@@ -5,9 +5,6 @@
 inline void Game::renderChat() {
     if (gameState != GameState::PLAYING) return;
     
-    int width, height;
-    emscripten_get_canvas_element_size("canvas", &width, &height);
-    
     auto messages = chatSystem.getVisibleMessages(currentTime);
     if (messages.empty() && !chatSystem.isChatOpen()) return;
     
@@ -16,11 +13,11 @@ inline void Game::renderChat() {
     
     // Chat positioning (bottom-left corner, Minecraft style)
     const float chatX = 10.0f;
-    const float chatBottomY = height - 50.0f;  // Leave space at bottom
+    const float chatBottomY = canvasHeight - 50.0f;  // Leave space at bottom
     const float lineHeight = 24.0f;  // Height of each line (increased for better readability)
     const float scale = 2.5f;  // Larger font size for better readability
     const float chatBgPadding = 8.0f;
-    const float chatBgWidth = width * 0.4f;  // 50% of screen width for more space
+    const float chatBgWidth = canvasWidth * 0.4f;  // 50% of screen width for more space
     
     // Calculate starting Y position (messages stack upward from bottom)
     int messageCount = messages.size();

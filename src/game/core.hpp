@@ -11,10 +11,15 @@ public:
     MeshManager meshManager;
     World world;
     Camera camera;
+    int canvasWidth = 0;
+    int canvasHeight = 0;
     Player player;
     mat4 projection;
     GLint mvpLoc;
     GLint timeLoc;
+    int lastCrosshairWidth = 0;
+    int lastCrosshairHeight = 0;
+    int crosshairVertexCount = 0;
 
     // Fog stuff
     GLint camPosLoc;
